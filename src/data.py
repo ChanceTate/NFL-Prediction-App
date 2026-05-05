@@ -18,10 +18,11 @@ def load_data():
 
     #Moving the new home_game column to be between team and opp for better
     #Readability
+    df.insert(0, "Name", "Lamar Jackson")
     col = df.pop("home_game")
     df.insert(6, "home_game", col)
 
-
+    print(df)
     return df
 load_data()
 
