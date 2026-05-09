@@ -1,4 +1,5 @@
 import pandas as pd
+import nflreadpy as nfl
 
 def load_data():
     #Read the CSV file into pandas with utf-8 encoding, we skip the first headers
