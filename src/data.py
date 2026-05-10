@@ -17,9 +17,3 @@ def load_player_data() -> pd.DataFrame:
 
 def filter_qbs(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["position"] == "QB"]
-
-
-if __name__ == "__main__":
-    df = load_player_data()
-    pd.set_option("display.max_columns", None)
-    print(list(df.columns))
