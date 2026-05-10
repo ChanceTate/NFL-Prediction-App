@@ -10,3 +10,21 @@ dependencies = [
     "pyarrow>=24.0.0",
     "scikit-learn>=1.8.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.7",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (unused imports, undefined names)
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade (modern python idioms)
+    "B",   # flake8-bugbear (common mistakes)
+]

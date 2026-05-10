@@ -1,7 +1,7 @@
-import pandas as pd
-import nflreadpy as nfl
 from pathlib import Path
 
+import nflreadpy as nfl
+import pandas as pd
 
 CACHE = Path("data/player_stats.parquet")
 

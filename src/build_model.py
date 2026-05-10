@@ -16,8 +16,10 @@ def split_train_test(df: pd.DataFrame):
     train = df[df["season"].isin(TRAIN_SEASONS)]
     test = df[df["season"].isin(TEST_SEASONS)]
     return (
-        train[FEATURE_COLS], train[TARGET_COL],
-        test[FEATURE_COLS], test[TARGET_COL],
+        train[FEATURE_COLS],
+        train[TARGET_COL],
+        test[FEATURE_COLS],
+        test[TARGET_COL],
     )
 
 
@@ -30,6 +32,8 @@ def build_training_set(df: pd.DataFrame):
 
 
 def train(X_train, Y_train) -> LinearRegression:
+    # Before we add categorical features, i think we should switch to LGBMClassifier
+    # from lightgbm. This way we dont have to deal with encoding stuff
     return LinearRegression().fit(X_train, Y_train)
 
 

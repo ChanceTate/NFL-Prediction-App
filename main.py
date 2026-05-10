@@ -1,7 +1,7 @@
 from sklearn.dummy import DummyRegressor
 
+from src.build_model import build_training_set, evaluate, train
 from src.data import load_player_data
-from src.build_model import build_training_set, train, evaluate
 
 
 def main():
