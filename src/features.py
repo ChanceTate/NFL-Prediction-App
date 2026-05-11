@@ -1,6 +1,6 @@
 import pandas as pd
 
-FEATURE_COLS = ["rolling_yds_3", "rolling_pass_atts_3"]
+FEATURE_COLS = ["rolling_yds_3", "rolling_pass_atts_3", "home_away_3"]
 
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -14,5 +14,6 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     # column for this, but we could calculate it by doing some fancy groupings
 
     # I think home/away could be useful
-
+    #UNTESTED
+    df["home_away_3"] = grouped["home_away"].transform(lambda x: x.shift(1).rolling(3).mean())
     return df
