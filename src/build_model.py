@@ -62,8 +62,9 @@ def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
     ).fit(X_train, Y_train)
 
 
-def evaluate(model, X_test, Y_test, label: str):
+def evaluate(model, X_test, Y_test, label: str) -> dict:
     preds = model.predict(X_test)
     mae = mean_absolute_error(Y_test, preds)
     r2 = r2_score(Y_test, preds)
     print(f"{label} MAE: {mae:.2f}, R²: {r2:.2f}")
+    return {"label": label.strip(), "mae": float(mae), "r2": float(r2)}

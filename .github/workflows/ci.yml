@@ -42,6 +42,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -81,24 +82,123 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: metrics
-          path: metrics.txt
+          path: |
+            metrics.txt
+            metrics.json
 
-      - name: Post or update PR comment with metrics
+      # Find the most recent successful main-branch CI run so we can pull its
+      # metrics artifact and compute changes. Returns null on the first PR
+      - name: Find latest main run id
+        id: find-main-run
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              branch: 'main',
+              status: 'success',
+              per_page: 1,
+            });
+            if (runs.workflow_runs.length === 0) {
+              core.warning('No previous successful main run — comment will show absolute values only.');
+              return '';
+            }
+            return runs.workflow_runs[0].id.toString();
+          result-encoding: string
+
+      - name: Download baseline metrics from main
+        if: github.event_name == 'pull_request' && steps.find-main-run.outputs.result != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: metrics
+          path: baseline/
+          run-id: ${{ steps.find-main-run.outputs.result }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Post comment with deltas, fail on regression
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const metrics = fs.readFileSync('metrics.txt', 'utf8');
             const marker = '<!-- metrics-comment -->';
-            const body = `${marker}\n## Model metrics\n\n\`\`\`\n${metrics}\`\`\``;
+            const TRACKED_FOR_REGRESSION = ['LinearRegression', 'LightGBM'];
+            const SKIP_LABEL = 'skip-metrics-check';
+
+            const current = JSON.parse(fs.readFileSync('metrics.json', 'utf8'));
+
+            let baseline = null;
+            try {
+              baseline = JSON.parse(fs.readFileSync('baseline/metrics.json', 'utf8'));
+            } catch (e) {
+              core.info('No baseline metrics.json available — first comparison.');
+            }
+
+            const findBaseline = (label) =>
+              baseline ? baseline.find((b) => b.label === label) : null;
+
+            const fmtDelta = (delta, lowerIsBetter) => {
+              if (delta === null) return '—';
+              const sign = delta > 0 ? '+' : '';
+              const isRegression = lowerIsBetter ? delta > 0 : delta < 0;
+              const emoji = Math.abs(delta) < 0.005 ? '' : (isRegression ? ' ⚠️' : ' ✅');
+              return `${sign}${delta.toFixed(2)}${emoji}`;
+            };
+
+            const rows = current.map((m) => {
+              const b = findBaseline(m.label);
+              const maeDelta = b ? m.mae - b.mae : null;
+              const r2Delta = b ? m.r2 - b.r2 : null;
+              return `| ${m.label} | ${m.mae.toFixed(2)} | ${fmtDelta(maeDelta, true)} | ${m.r2.toFixed(2)} | ${fmtDelta(r2Delta, false)} |`;
+            });
+
+            const baselineNote = baseline
+              ? `Compared against main run [#${{ steps.find-main-run.outputs.result }}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ steps.find-main-run.outputs.result }}).`
+              : '_No baseline available — this is likely the first run, or main has no successful CI yet._';
+
+            // Detect regressions on tracked models
+            const regressions = [];
+            for (const m of current) {
+              if (!TRACKED_FOR_REGRESSION.includes(m.label)) continue;
+              const b = findBaseline(m.label);
+              if (!b) continue;
+              const delta = m.mae - b.mae;
+              if (delta > 0) {
+                regressions.push(`${m.label} MAE worsened by ${delta.toFixed(2)} (${b.mae.toFixed(2)} → ${m.mae.toFixed(2)})`);
+              }
+            }
+
+            const labels = (context.payload.pull_request?.labels || []).map((l) => l.name);
+            const skip = labels.includes(SKIP_LABEL);
+
+            let regressionBlock = '';
+            if (regressions.length > 0) {
+              regressionBlock =
+                `\n\n### ⚠️ Regression detected\n\n` +
+                regressions.map((r) => `- ${r}`).join('\n') +
+                (skip
+                  ? `\n\n_Skipped by \`${SKIP_LABEL}\` label._`
+                  : `\n\nAdd the \`${SKIP_LABEL}\` label if this is intentional.`);
+            }
+
+            const body =
+              `${marker}\n## Model metrics\n\n` +
+              `| Model | MAE | Δ MAE | R² | Δ R² |\n` +
+              `|---|---|---|---|---|\n` +
+              rows.join('\n') +
+              `\n\n${baselineNote}` +
+              regressionBlock;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            const existing = comments.find(c => c.body && c.body.includes(marker));
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
 
             if (existing) {
               await github.rest.issues.updateComment({
@@ -114,4 +214,10 @@ jobs:
                 issue_number: context.issue.number,
                 body,
               });
+            }
+
+            if (regressions.length > 0 && !skip) {
+              core.setFailed(
+                `MAE regression detected. Add '${SKIP_LABEL}' label to override.\n\n${regressions.join('\n')}`
+              );
             }
