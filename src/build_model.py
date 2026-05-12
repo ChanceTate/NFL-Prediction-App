@@ -46,7 +46,8 @@ def train_linear_regression(X_train, Y_train) -> LinearRegression:
 
 
 def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
-    return LGBMRegressor(verbose=-1).fit(X_train, Y_train)
+    # random_state pinned so CI metrics don't vary from run to run.
+    return LGBMRegressor(verbose=-1, random_state=42).fit(X_train, Y_train)
 
 
 def evaluate(model, X_test, Y_test, label: str):
