@@ -46,8 +46,20 @@ def train_linear_regression(X_train, Y_train) -> LinearRegression:
 
 
 def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
-    # random_state pinned so CI metrics don't vary from run to run.
-    return LGBMRegressor(verbose=-1, random_state=42).fit(X_train, Y_train)
+    # Since we have so few features and so little data at the moment, the default
+    # lgbm parameters were causing some overfitting. These are some
+    # tweaks i found that helped a bit, but we should keep an eye on this as we add more features
+    return LGBMRegressor(
+        n_estimators=200,
+        learning_rate=0.03,
+        num_leaves=8,
+        min_child_samples=30,
+        reg_lambda=1.0,
+        subsample=0.8,
+        subsample_freq=1,
+        random_state=42,
+        verbose=-1,
+    ).fit(X_train, Y_train)
 
 
 def evaluate(model, X_test, Y_test, label: str):
