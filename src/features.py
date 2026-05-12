@@ -3,7 +3,7 @@ import pandas as pd
 FEATURE_COLS = [
     "rolling_yds_3",
     "rolling_pass_atts_3",
-    "opp_pass_yds_allowed_3",
+    # opp_pass_yds_allowed_3 deliberately removed — test PR for CI regression check
 ]
 
 
