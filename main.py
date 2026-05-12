@@ -1,6 +1,11 @@
 from sklearn.dummy import DummyRegressor
 
-from src.build_model import build_training_set, evaluate, train
+from src.build_model import (
+    build_training_set,
+    evaluate,
+    train_lightgbm,
+    train_linear_regression,
+)
 from src.data import load_player_data
 
 
@@ -8,11 +13,13 @@ def main():
     df = load_player_data()
     X_train, Y_train, X_test, Y_test = build_training_set(df)
 
-    model = train(X_train, Y_train)
+    lr = train_linear_regression(X_train, Y_train)
+    lgbm = train_lightgbm(X_train, Y_train)
     baseline = DummyRegressor(strategy="mean").fit(X_train, Y_train)
 
-    evaluate(model, X_test, Y_test, "LinearRegression")
-    evaluate(baseline, X_test, Y_test, "Baseline (mean)")
+    evaluate(lr, X_test, Y_test, "LinearRegression")
+    evaluate(lgbm, X_test, Y_test, "LightGBM        ")
+    evaluate(baseline, X_test, Y_test, "Baseline (mean) ")
 
 
 if __name__ == "__main__":
