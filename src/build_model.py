@@ -2,7 +2,6 @@ import pandas as pd
 from lightgbm import LGBMRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, r2_score
 
 from src.data import filter_qbs
 from src.features import (
@@ -15,10 +14,25 @@ from src.features import (
     add_top_receiver_rolling,
 )
 
-TRAIN_SEASONS = [2020, 2021, 2022, 2023]
-TEST_SEASONS = [2024, 2025]
-
 TARGET_COL = "passing_yards"
+
+# Sliding-window walk-forward CV folds. Each fold trains on exactly 3 seasons
+# so training-set size is constant across folds. fold-to-fold variance
+# reflects test season difficulty, not "more data helps." We pay for that
+# cleaner variance by discarding the oldest training season each fold.
+WALK_FORWARD_FOLDS = [
+    {"train": [2020, 2021, 2022], "test": [2023]},
+    {"train": [2021, 2022, 2023], "test": [2024]},
+    {"train": [2022, 2023, 2024], "test": [2025]},
+]
+
+# Every fold's training seasons must come before its test
+# season. Catches the case where we edit the folds and accidentally
+# introduce overlap.
+for _fold in WALK_FORWARD_FOLDS:
+    if max(_fold["train"]) >= min(_fold["test"]):
+        raise ValueError(f"Walk-forward fold has train season >= test season: {_fold}")
+del _fold
 
 # Defines which rows enter train/test. New features
 # must impute NaN themselves rather than shrink this set, otherwise the
@@ -42,10 +56,14 @@ def _assert_no_extra_nans(df: pd.DataFrame, cols: list[str]) -> None:
         )
 
 
-def split_train_test(df: pd.DataFrame):
-    """Time-based split: earlier seasons train, later seasons test."""
-    train = df[df["season"].isin(TRAIN_SEASONS)]
-    test = df[df["season"].isin(TEST_SEASONS)]
+def split_train_test(
+    df: pd.DataFrame,
+    train_seasons: list[int],
+    test_seasons: list[int],
+):
+    """Time-based split: rows in train_seasons → train; rows in test_seasons → test."""
+    train = df[df["season"].isin(train_seasons)]
+    test = df[df["season"].isin(test_seasons)]
     return (
         train[FEATURE_COLS],
         train[TARGET_COL],
@@ -54,7 +72,11 @@ def split_train_test(df: pd.DataFrame):
     )
 
 
-def build_training_set(df: pd.DataFrame):
+def build_training_set(
+    df: pd.DataFrame,
+    train_seasons: list[int],
+    test_seasons: list[int],
+):
     """Filter to QBs, engineer features, drop unusable rows, split by season."""
     qbs = filter_qbs(df)
     qbs = add_rolling_passing_yards(qbs)
@@ -67,7 +89,7 @@ def build_training_set(df: pd.DataFrame):
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
     _assert_no_extra_nans(qbs, FEATURE_COLS)
 
-    return split_train_test(qbs)
+    return split_train_test(qbs, train_seasons, test_seasons)
 
 
 def train_linear_regression(X_train, Y_train) -> LinearRegression:
@@ -88,14 +110,6 @@ def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
         random_state=42,
         verbose=-1,
     ).fit(X_train, Y_train)
-
-
-def evaluate(model, X_test, Y_test, label: str) -> dict:
-    preds = model.predict(X_test)
-    mae = mean_absolute_error(Y_test, preds)
-    r2 = r2_score(Y_test, preds)
-    print(f"{label} MAE: {mae:.2f}, R²: {r2:.2f}")
-    return {"label": label.strip(), "mae": float(mae), "r2": float(r2)}
 
 
 def feature_importance(model, X_test, Y_test, n_repeats: int = 10) -> pd.Series:
