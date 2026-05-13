@@ -5,6 +5,7 @@ from sklearn.linear_model import LinearRegression
 from src.build_model import (
     TARGET_COL,
     WALK_FORWARD_FOLDS,
+    feature_ablation,
     feature_importance,
     split_train_test,
 )
@@ -74,3 +75,38 @@ def test_feature_importance_ranks_predictive_feature_highest():
     assert importance.index[0] == "signal"
     assert importance["signal"] > importance["noise_a"]
     assert importance["signal"] > importance["noise_b"]
+
+
+def test_feature_ablation_ranks_predictive_feature_highest():
+    # Same synthetic setup as the importance test, but measure ablation:
+    # removing the signal column should worsen MAE far more than removing
+    # either noise column.
+    rng = np.random.default_rng(0)
+    n = 200
+    X = pd.DataFrame(
+        {
+            "signal": rng.normal(size=n),
+            "noise_a": rng.normal(size=n),
+            "noise_b": rng.normal(size=n),
+        }
+    )
+    Y = X["signal"] * 5 + rng.normal(scale=0.1, size=n)
+
+    # Split train/test so ablation has a separate test set
+    X_train, X_test = X.iloc[:150], X.iloc[150:]
+    Y_train, Y_test = Y.iloc[:150], Y.iloc[150:]
+
+    ablation = feature_ablation(
+        lambda Xt, Yt: LinearRegression().fit(Xt, Yt),
+        X_train,
+        Y_train,
+        X_test,
+        Y_test,
+    )
+
+    # Removing the signal column should hurt the model a lot (large positive Δ).
+    # Removing either noise column should barely change MAE.
+    assert ablation.index[0] == "signal"
+    assert ablation["signal"] > 1.0  # signal removal causes meaningful MAE jump
+    assert abs(ablation["noise_a"]) < 0.5  # noise removal barely matters
+    assert abs(ablation["noise_b"]) < 0.5
