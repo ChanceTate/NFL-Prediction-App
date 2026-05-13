@@ -133,38 +133,69 @@ jobs:
             const SKIP_LABEL = 'skip-metrics-check';
 
             const current = JSON.parse(fs.readFileSync('metrics.json', 'utf8'));
+            const currentAggregate = current.aggregate || [];
+            const currentFolds = current.folds || [];
 
             let baseline = null;
+            let baselineAggregate = null;
             try {
-              baseline = JSON.parse(fs.readFileSync('baseline/metrics.json', 'utf8'));
+              const raw = JSON.parse(fs.readFileSync('baseline/metrics.json', 'utf8'));
+              // Only the new walk-forward structure has an "aggregate" key.
+              // Older single-fold baselines (pre-walk-forward) are skipped so
+              // we don't compare apples to oranges.
+              if (raw && raw.aggregate) {
+                baseline = raw;
+                baselineAggregate = raw.aggregate;
+              } else {
+                core.info('Baseline metrics.json predates walk-forward CV — skipping comparison.');
+              }
             } catch (e) {
               core.info('No baseline metrics.json available — first comparison.');
             }
 
             const findBaseline = (label) =>
-              baseline ? baseline.find((b) => b.label === label) : null;
+              baselineAggregate ? baselineAggregate.find((b) => b.label === label) : null;
 
-            const fmtDelta = (delta, lowerIsBetter) => {
-              if (delta === null) return '—';
+            // Delta is "noise" if its magnitude is below half of main's stddev
+            // for the same metric — that's the natural noise band for this
+            // walk-forward setup. Outside the band, label as improvement or
+            // regression with an emoji.
+            const fmtDelta = (delta, baselineStd, lowerIsBetter) => {
+              if (delta === null || delta === undefined) return '—';
               const sign = delta > 0 ? '+' : '';
+              const noiseBand = 0.5 * (baselineStd || 0);
+              const isNoise = Math.abs(delta) <= noiseBand;
               const isRegression = lowerIsBetter ? delta > 0 : delta < 0;
-              const emoji = Math.abs(delta) < 0.005 ? '' : (isRegression ? ' ⚠️' : ' ✅');
+              const emoji = isNoise ? '' : (isRegression ? ' ⚠️' : ' ✅');
               return `${sign}${delta.toFixed(2)}${emoji}`;
             };
 
-            const rows = current.map((m) => {
+            // Aggregate table: mean ± std + worst fold + delta vs main
+            const aggregateRows = currentAggregate.map((m) => {
               const b = findBaseline(m.label);
-              const maeDelta = b ? m.mae - b.mae : null;
-              const r2Delta = b ? m.r2 - b.r2 : null;
-              return `| ${m.label} | ${m.mae.toFixed(2)} | ${fmtDelta(maeDelta, true)} | ${m.r2.toFixed(2)} | ${fmtDelta(r2Delta, false)} |`;
+              const maeDelta = b ? m.mae_mean - b.mae_mean : null;
+              const r2Delta = b ? m.r2_mean - b.r2_mean : null;
+              return `| ${m.label} | ${m.mae_mean.toFixed(2)} ± ${m.mae_std.toFixed(2)} | ${fmtDelta(maeDelta, b ? b.mae_std : 0, true)} | ${m.mae_max.toFixed(2)} | ${m.r2_mean.toFixed(2)} ± ${m.r2_std.toFixed(2)} | ${fmtDelta(r2Delta, b ? b.r2_std : 0, false)} |`;
             });
 
-            const baselineNote = baseline
-              ? `Compared against main run [#${{ steps.find-main-run.outputs.result }}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ steps.find-main-run.outputs.result }}).`
-              : '_No baseline available — this is likely the first run, or main has no successful CI yet._';
+            // Per-fold table: MAE per (model, test season)
+            const seasons = currentFolds.map((f) => f.test_season);
+            const modelLabels = TRACKED_FOR_REGRESSION.concat(['Baseline (mean)']);
+            const perFoldHeader = `| Model | ${seasons.join(' | ')} |`;
+            const perFoldSep = `|---${'|---'.repeat(seasons.length)}|`;
+            const perFoldRows = modelLabels.map((label) => {
+              const cells = currentFolds.map((f) => {
+                const m = f.models.find((x) => x.label === label);
+                return m ? m.mae.toFixed(2) : '—';
+              });
+              return `| ${label} | ${cells.join(' | ')} |`;
+            });
 
-            // Build the feature-importance section. Combined table per model so
-            // reviewers can see at a glance where LR and LGBM agree/disagree.
+            const baselineNote = baselineAggregate
+              ? `Compared against main run [#${{ steps.find-main-run.outputs.result }}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ steps.find-main-run.outputs.result }}).`
+              : '_No baseline available — this is likely the first run, or main predates walk-forward CV._';
+
+            // Feature importance: rendered as a combined table across models
             let importanceBlock = '';
             try {
               const importance = JSON.parse(fs.readFileSync('importance.json', 'utf8'));
@@ -177,7 +208,6 @@ jobs:
                     featureMap.get(i.feature)[m.label] = i.value;
                   }
                 }
-                // Sort features by the first model's importance (descending).
                 const firstLabel = labels[0];
                 const features = [...featureMap.entries()].sort(
                   (a, b) => (b[1][firstLabel] ?? 0) - (a[1][firstLabel] ?? 0)
@@ -188,27 +218,35 @@ jobs:
                   `| ${feature} | ${labels.map((l) => (vals[l] ?? 0).toFixed(2)).join(' | ')} |`
                 );
                 importanceBlock =
-                  `\n\n## Feature importance (MAE worsening when shuffled)\n\n` +
+                  `\n\n## Feature importance (mean across folds, MAE worsening when shuffled)\n\n` +
                   `${header}\n${sep}\n${rows.join('\n')}`;
               }
             } catch (e) {
               core.info('No importance.json available — skipping importance section.');
             }
 
-            // Detect regressions on tracked models
+            // Regression check: fail only if mean MAE worsens by more than
+            // half of main's fold-to-fold stddev. Within that band, the change
+            // is statistically indistinguishable from "we got a different
+            // luck-of-the-draw on the test seasons" so we don't fail.
             const regressions = [];
-            for (const m of current) {
+            for (const m of currentAggregate) {
               if (!TRACKED_FOR_REGRESSION.includes(m.label)) continue;
               const b = findBaseline(m.label);
               if (!b) continue;
-              const delta = m.mae - b.mae;
-              if (delta > 0) {
-                regressions.push(`${m.label} MAE worsened by ${delta.toFixed(2)} (${b.mae.toFixed(2)} → ${m.mae.toFixed(2)})`);
+              const delta = m.mae_mean - b.mae_mean;
+              const noiseBand = 0.5 * (b.mae_std || 0);
+              if (delta > noiseBand) {
+                regressions.push(
+                  `${m.label} mean MAE worsened by ${delta.toFixed(2)} ` +
+                  `(${b.mae_mean.toFixed(2)} → ${m.mae_mean.toFixed(2)}), ` +
+                  `beyond noise band of ±${noiseBand.toFixed(2)} (0.5× main std).`
+                );
               }
             }
 
-            const labels = (context.payload.pull_request?.labels || []).map((l) => l.name);
-            const skip = labels.includes(SKIP_LABEL);
+            const prLabels = (context.payload.pull_request?.labels || []).map((l) => l.name);
+            const skip = prLabels.includes(SKIP_LABEL);
 
             let regressionBlock = '';
             if (regressions.length > 0) {
@@ -221,11 +259,15 @@ jobs:
             }
 
             const body =
-              `${marker}\n## Model metrics\n\n` +
-              `| Model | MAE | Δ MAE | R² | Δ R² |\n` +
-              `|---|---|---|---|---|\n` +
-              rows.join('\n') +
-              `\n\n${baselineNote}` +
+              `${marker}\n## Model metrics (walk-forward CV)\n\n` +
+              `### Aggregate (mean ± std across ${currentFolds.length} folds)\n\n` +
+              `| Model | MAE | Δ MAE | Worst fold | R² | Δ R² |\n` +
+              `|---|---|---|---|---|---|\n` +
+              aggregateRows.join('\n') +
+              `\n\nΔ is flagged ✅/⚠️ only when its magnitude exceeds 0.5× main's fold-to-fold std (the noise band).\n\n` +
+              `### Per-fold MAE\n\n` +
+              `${perFoldHeader}\n${perFoldSep}\n${perFoldRows.join('\n')}\n\n` +
+              baselineNote +
               regressionBlock +
               importanceBlock;
 
