@@ -133,6 +133,7 @@ data/
 # Metrics output from main.py (regenerated each run; CI uploads as artifact)
 metrics.json
 metrics.txt
+importance.json
 
 # Environments
 .env

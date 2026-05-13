@@ -85,6 +85,7 @@ jobs:
           path: |
             metrics.txt
             metrics.json
+            importance.json
 
       # Find the most recent successful main-branch CI run so we can pull its
       # metrics artifact and compute changes. Returns null on the first PR
@@ -160,6 +161,38 @@ jobs:
               ? `Compared against main run [#${{ steps.find-main-run.outputs.result }}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ steps.find-main-run.outputs.result }}).`
               : '_No baseline available — this is likely the first run, or main has no successful CI yet._';
 
+            // Build the feature-importance section. Combined table per model so
+            // reviewers can see at a glance where LR and LGBM agree/disagree.
+            let importanceBlock = '';
+            try {
+              const importance = JSON.parse(fs.readFileSync('importance.json', 'utf8'));
+              if (importance.length > 0) {
+                const labels = importance.map((m) => m.label);
+                const featureMap = new Map();
+                for (const m of importance) {
+                  for (const i of m.importance) {
+                    if (!featureMap.has(i.feature)) featureMap.set(i.feature, {});
+                    featureMap.get(i.feature)[m.label] = i.value;
+                  }
+                }
+                // Sort features by the first model's importance (descending).
+                const firstLabel = labels[0];
+                const features = [...featureMap.entries()].sort(
+                  (a, b) => (b[1][firstLabel] ?? 0) - (a[1][firstLabel] ?? 0)
+                );
+                const header = `| Feature | ${labels.join(' | ')} |`;
+                const sep = `|---${'|---'.repeat(labels.length)}|`;
+                const rows = features.map(([feature, vals]) =>
+                  `| ${feature} | ${labels.map((l) => (vals[l] ?? 0).toFixed(2)).join(' | ')} |`
+                );
+                importanceBlock =
+                  `\n\n## Feature importance (MAE worsening when shuffled)\n\n` +
+                  `${header}\n${sep}\n${rows.join('\n')}`;
+              }
+            } catch (e) {
+              core.info('No importance.json available — skipping importance section.');
+            }
+
             // Detect regressions on tracked models
             const regressions = [];
             for (const m of current) {
@@ -191,7 +224,8 @@ jobs:
               `|---|---|---|---|---|\n` +
               rows.join('\n') +
               `\n\n${baselineNote}` +
-              regressionBlock;
+              regressionBlock +
+              importanceBlock;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
