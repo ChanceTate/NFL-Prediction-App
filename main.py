@@ -164,7 +164,7 @@ def main():
         imp_lookup = {i["feature"]: i["value"] for i in imp["importance"]}
 
         print(f"\n{label} feature analysis (mean across folds):")
-        print(f"  {'feature':30} {'permutation':>12} {'ablation Δ':>13}")
+        print(f"  {'feature':30} {'permutation':>12} {'ablation delta':>15}")
         for item in abl["ablation"]:
             f = item["feature"]
             print(f"  {f:30} {imp_lookup.get(f, 0.0):12.2f} {item['delta_mean']:+13.2f}")
