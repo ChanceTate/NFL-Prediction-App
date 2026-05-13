@@ -5,6 +5,7 @@ FEATURE_COLS = [
     "rolling_pass_atts_3",
     "opp_pass_yds_allowed_3",
     "rolling_epa_per_att_3",
+    "rolling_team_plays_3",
 ]
 
 
@@ -55,7 +56,7 @@ def add_opponent_pass_defense(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.
     allowed = allowed.sort_values(["def_team", "season", "week"]).reset_index(drop=True)
 
     # Rolling within a season. Resets at season boundary so the feature reflects
-    # current-season form, not stale carry-over from prior years.
+    # current-season form
     allowed["rolling"] = allowed.groupby(["def_team", "season"])["pass_yds_allowed"].transform(
         lambda x: x.shift(1).rolling(3).mean()
     )
@@ -85,3 +86,46 @@ def add_opponent_pass_defense(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.
         right_on=["def_team", "season", "week"],
         how="left",
     ).drop(columns=["def_team"])
+
+
+def add_rolling_team_plays(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.DataFrame:
+    # Total team offensive plays per game = sum of pass attempts + rush carries
+    # across all players on that team in (season, week). Computed from full_df
+    # so RB and WR carries also count toward team pace.
+    plays = full_df.groupby(["team", "season", "week"], as_index=False).agg(
+        attempts=("attempts", "sum"),
+        carries=("carries", "sum"),
+    )
+    plays["total_plays"] = plays["attempts"] + plays["carries"]
+    plays = plays.sort_values(["team", "season", "week"]).reset_index(drop=True)
+
+    # Rolling within season. Resets at season boundary so the feature reflects
+    # current-season pace
+    plays["rolling"] = plays.groupby(["team", "season"])["total_plays"].transform(
+        lambda x: x.shift(1).rolling(3).mean()
+    )
+
+    # Early-season fallback: weeks 1-3 of season N use season N-1's full-season
+    # average for that team. Built by averaging per (team, season) and rekeying
+    # to season+1 so the merge lands on the following year.
+    prior_season = (
+        plays.groupby(["team", "season"], as_index=False)["total_plays"]
+        .mean()
+        .rename(columns={"total_plays": "prior_season_avg"})
+    )
+    prior_season["season"] = prior_season["season"] + 1
+    plays = plays.merge(prior_season, on=["team", "season"], how="left")
+
+    # Final fallback: league-wide average. Only kicks in for the earliest season,
+    # where no prior-season baseline exists.
+    league_avg = plays["total_plays"].mean()
+
+    plays["rolling_team_plays_3"] = (
+        plays["rolling"].fillna(plays["prior_season_avg"]).fillna(league_avg)
+    )
+
+    return qb_df.merge(
+        plays[["team", "season", "week", "rolling_team_plays_3"]],
+        on=["team", "season", "week"],
+        how="left",
+    )
