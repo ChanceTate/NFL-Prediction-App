@@ -88,6 +88,7 @@ jobs:
             metrics.txt
             metrics.json
             importance.json
+            ablation.json
 
       # Find the most recent successful main-branch CI run so we can pull its
       # metrics artifact and compute changes. Returns null on the first PR
@@ -195,34 +196,57 @@ jobs:
               ? `Compared against main run [#${{ steps.find-main-run.outputs.result }}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ steps.find-main-run.outputs.result }}).`
               : '_No baseline available — this is likely the first run, or main predates walk-forward CV._';
 
-            // Feature importance: rendered as a combined table across models
-            let importanceBlock = '';
+            // Feature analysis: one table per model showing permutation
+            // importance and ablation Δ side-by-side. Disagreement between
+            // the two columns is the most informative signal: high perm +
+            // low ablation = redundant; low perm + high ablation = unique
+            // contributor the model is under-using.
+            let analysisBlock = '';
             try {
               const importance = JSON.parse(fs.readFileSync('importance.json', 'utf8'));
+              let ablation = [];
+              try {
+                ablation = JSON.parse(fs.readFileSync('ablation.json', 'utf8'));
+              } catch (e) {
+                core.info('No ablation.json available — rendering permutation only.');
+              }
               if (importance.length > 0) {
-                const labels = importance.map((m) => m.label);
-                const featureMap = new Map();
-                for (const m of importance) {
-                  for (const i of m.importance) {
-                    if (!featureMap.has(i.feature)) featureMap.set(i.feature, {});
-                    featureMap.get(i.feature)[m.label] = i.value;
-                  }
-                }
-                const firstLabel = labels[0];
-                const features = [...featureMap.entries()].sort(
-                  (a, b) => (b[1][firstLabel] ?? 0) - (a[1][firstLabel] ?? 0)
-                );
-                const header = `| Feature | ${labels.join(' | ')} |`;
-                const sep = `|---${'|---'.repeat(labels.length)}|`;
-                const rows = features.map(([feature, vals]) =>
-                  `| ${feature} | ${labels.map((l) => (vals[l] ?? 0).toFixed(2)).join(' | ')} |`
-                );
-                importanceBlock =
-                  `\n\n## Feature importance (mean across folds, MAE worsening when shuffled)\n\n` +
-                  `${header}\n${sep}\n${rows.join('\n')}`;
+                const sections = importance.map((impEntry) => {
+                  const label = impEntry.label;
+                  const impLookup = Object.fromEntries(
+                    impEntry.importance.map((i) => [i.feature, i.value])
+                  );
+                  const ablEntry = ablation.find((a) => a.label === label);
+                  const ablRows = ablEntry ? ablEntry.ablation : [];
+                  // If we have ablation, order rows by ablation Δ descending;
+                  // otherwise fall back to permutation order.
+                  const rows = ablEntry
+                    ? ablRows.map((row) => {
+                        const perm = impLookup[row.feature] ?? 0;
+                        return `| ${row.feature} | ${perm.toFixed(2)} | ${row.delta_mean >= 0 ? '+' : ''}${row.delta_mean.toFixed(2)} ± ${row.delta_std.toFixed(2)} |`;
+                      })
+                    : impEntry.importance.map(
+                        (i) => `| ${i.feature} | ${i.value.toFixed(2)} | — |`
+                      );
+                  return (
+                    `### ${label}\n\n` +
+                    `| Feature | Permutation | Ablation Δ MAE |\n` +
+                    `|---|---|---|\n` +
+                    rows.join('\n')
+                  );
+                });
+                analysisBlock =
+                  `\n\n## Feature analysis (mean across folds)\n\n` +
+                  `Permutation = how much the trained model uses each feature ` +
+                  `(MAE worsening when its values are shuffled). Ablation Δ = ` +
+                  `how much MAE worsens if the model is retrained without it. ` +
+                  `Disagreement is informative: high permutation + low ablation = ` +
+                  `redundant (model uses it but doesn't need it); low permutation + ` +
+                  `high ablation = unique contributor.\n\n` +
+                  sections.join('\n\n');
               }
             } catch (e) {
-              core.info('No importance.json available — skipping importance section.');
+              core.info('No importance.json available — skipping feature analysis.');
             }
 
             // Regression check: fail only if mean MAE worsens by more than
@@ -269,7 +293,7 @@ jobs:
               `${perFoldHeader}\n${perFoldSep}\n${perFoldRows.join('\n')}\n\n` +
               baselineNote +
               regressionBlock +
-              importanceBlock;
+              analysisBlock;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,

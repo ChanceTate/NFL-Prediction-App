@@ -2,6 +2,7 @@ import pandas as pd
 from lightgbm import LGBMRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error
 
 from src.data import filter_qbs
 from src.features import (
@@ -114,7 +115,12 @@ def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
 
 def feature_importance(model, X_test, Y_test, n_repeats: int = 10) -> pd.Series:
     """Permutation importance: average MAE worsening when each feature is shuffled.
-    Higher = more important."""
+    Higher = more important.
+
+    Pairs with feature_ablation: this measures what the trained model USES;
+    ablation measures what the model NEEDS. They diverge when features are
+    redundant.
+    """
     result = permutation_importance(
         model,
         X_test,
@@ -124,3 +130,21 @@ def feature_importance(model, X_test, Y_test, n_repeats: int = 10) -> pd.Series:
         random_state=42,
     )
     return pd.Series(result.importances_mean, index=X_test.columns).sort_values(ascending=False)
+
+
+def feature_ablation(train_func, X_train, Y_train, X_test, Y_test) -> pd.Series:
+    """Leave-one-out ablation: for each feature, retrain the model without it
+    and measure the change in MAE. Returns Δ MAE per feature.
+
+    Positive Δ = removing the feature hurt the model (feature was contributing
+    unique information). Negative Δ = removing the feature helped (feature was
+    noise or fully redundant with others).
+    """
+    baseline = train_func(X_train, Y_train)
+    baseline_mae = mean_absolute_error(Y_test, baseline.predict(X_test))
+    deltas = {}
+    for feat in X_train.columns:
+        cols = [c for c in X_train.columns if c != feat]
+        m = train_func(X_train[cols], Y_train)
+        deltas[feat] = mean_absolute_error(Y_test, m.predict(X_test[cols])) - baseline_mae
+    return pd.Series(deltas).sort_values(ascending=False)

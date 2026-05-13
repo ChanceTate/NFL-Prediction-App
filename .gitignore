@@ -134,6 +134,7 @@ data/
 metrics.json
 metrics.txt
 importance.json
+ablation.json
 
 # Environments
 .env

@@ -9,6 +9,7 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from src.build_model import (
     WALK_FORWARD_FOLDS,
     build_training_set,
+    feature_ablation,
     feature_importance,
     train_lightgbm,
     train_linear_regression,
@@ -17,7 +18,12 @@ from src.data import load_player_data
 
 # Models tracked across folds.
 TRACKED_MODELS = ["LinearRegression", "LightGBM", "Baseline (mean)"]
-IMPORTANCE_MODELS = ["LinearRegression", "LightGBM"]
+ANALYSIS_MODELS = ["LinearRegression", "LightGBM"]
+# Maps model label → training function for ablation re-training.
+TRAIN_FUNCS = {
+    "LinearRegression": train_linear_regression,
+    "LightGBM": train_lightgbm,
+}
 
 
 def _evaluate(model, X_test, Y_test) -> dict:
@@ -64,11 +70,32 @@ def _aggregate_importance(per_fold: dict[str, list[pd.Series]]) -> list[dict]:
     return out
 
 
+def _aggregate_ablation(per_fold: dict[str, list[pd.Series]]) -> list[dict]:
+    """Mean and stddev of ablation Δ per feature across folds. Stddev gives
+    a sense of how stable the contribution is across folds."""
+    out = []
+    for label, deltas_per_fold in per_fold.items():
+        stacked = pd.concat(deltas_per_fold, axis=1)
+        mean = stacked.mean(axis=1).sort_values(ascending=False)
+        std = stacked.std(axis=1, ddof=1)
+        out.append(
+            {
+                "label": label,
+                "ablation": [
+                    {"feature": f, "delta_mean": float(mean[f]), "delta_std": float(std[f])}
+                    for f in mean.index
+                ],
+            }
+        )
+    return out
+
+
 def main():
     df = load_player_data()
 
     fold_results: list[dict] = []
-    per_fold_importance: dict[str, list[pd.Series]] = {label: [] for label in IMPORTANCE_MODELS}
+    per_fold_importance: dict[str, list[pd.Series]] = {label: [] for label in ANALYSIS_MODELS}
+    per_fold_ablation: dict[str, list[pd.Series]] = {label: [] for label in ANALYSIS_MODELS}
 
     for fold in WALK_FORWARD_FOLDS:
         X_train, Y_train, X_test, Y_test = build_training_set(
@@ -94,16 +121,21 @@ def main():
             }
         )
 
-        per_fold_importance["LinearRegression"].append(feature_importance(lr, X_test, Y_test))
-        per_fold_importance["LightGBM"].append(feature_importance(lgbm, X_test, Y_test))
+        for label, trained_model in [("LinearRegression", lr), ("LightGBM", lgbm)]:
+            per_fold_importance[label].append(feature_importance(trained_model, X_test, Y_test))
+            per_fold_ablation[label].append(
+                feature_ablation(TRAIN_FUNCS[label], X_train, Y_train, X_test, Y_test)
+            )
 
     aggregate = _aggregate(fold_results)
     importance_results = _aggregate_importance(per_fold_importance)
+    ablation_results = _aggregate_ablation(per_fold_ablation)
 
     Path("metrics.json").write_text(
         json.dumps({"folds": fold_results, "aggregate": aggregate}, indent=2)
     )
     Path("importance.json").write_text(json.dumps(importance_results, indent=2))
+    Path("ablation.json").write_text(json.dumps(ablation_results, indent=2))
 
     # Summary
     print("Walk-forward CV (sliding window, 3 train seasons per fold)")
@@ -125,10 +157,17 @@ def main():
             f"R²={m['r2_mean']:5.2f} ± {m['r2_std']:.2f}"
         )
 
-    for entry in importance_results:
-        print(f"\n{entry['label']} feature importance (mean across folds):")
-        for item in entry["importance"]:
-            print(f"  {item['feature']:30} {item['value']:6.2f}")
+    # Combined permutation + ablation per model, ordered by ablation Δ.
+    for label in ANALYSIS_MODELS:
+        imp = next(e for e in importance_results if e["label"] == label)
+        abl = next(e for e in ablation_results if e["label"] == label)
+        imp_lookup = {i["feature"]: i["value"] for i in imp["importance"]}
+
+        print(f"\n{label} feature analysis (mean across folds):")
+        print(f"  {'feature':30} {'permutation':>12} {'ablation delta':>15}")
+        for item in abl["ablation"]:
+            f = item["feature"]
+            print(f"  {f:30} {imp_lookup.get(f, 0.0):12.2f} {item['delta_mean']:+13.2f}")
 
 
 if __name__ == "__main__":
