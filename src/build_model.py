@@ -1,5 +1,6 @@
 import pandas as pd
 from lightgbm import LGBMRegressor
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 
@@ -91,3 +92,17 @@ def evaluate(model, X_test, Y_test, label: str) -> dict:
     r2 = r2_score(Y_test, preds)
     print(f"{label} MAE: {mae:.2f}, R²: {r2:.2f}")
     return {"label": label.strip(), "mae": float(mae), "r2": float(r2)}
+
+
+def feature_importance(model, X_test, Y_test, n_repeats: int = 10) -> pd.Series:
+    """Permutation importance: average MAE worsening when each feature is shuffled.
+    Higher = more important."""
+    result = permutation_importance(
+        model,
+        X_test,
+        Y_test,
+        scoring="neg_mean_absolute_error",
+        n_repeats=n_repeats,
+        random_state=42,
+    )
+    return pd.Series(result.importances_mean, index=X_test.columns).sort_values(ascending=False)
