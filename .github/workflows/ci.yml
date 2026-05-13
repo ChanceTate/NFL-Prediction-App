@@ -57,12 +57,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      # Cache the nflreadpy data so reruns are fast. Key busts
-      # whenever src/data.py changes (e.g. season list updates).
+      # Cache the nflreadpy data so reruns are fast. Key busts whenever
+      # src/data.py changes (e.g. season list updates). Path is the whole
+      # data/ directory so the cache survives filename changes (the parquet
+      # name now includes the season range).
       - name: Cache player stats parquet
         uses: actions/cache@v4
         with:
-          path: data/player_stats.parquet
+          path: data
           key: player-stats-${{ hashFiles('src/data.py') }}
 
       - name: Run model and capture metrics
