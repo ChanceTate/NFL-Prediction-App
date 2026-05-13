@@ -6,7 +6,13 @@ FEATURE_COLS = [
     "opp_pass_yds_allowed_3",
     "rolling_epa_per_att_3",
     "rolling_team_plays_3",
+    "top_receiver_rolling_yds_3",
 ]
+
+# Positions that catch passes. Excludes defenders (who have 0 receiving_yards
+# and would just waste compute) and QBs (rarely catch passes, would clutter
+# the per-team max).
+RECEIVING_POSITIONS = {"WR", "TE", "RB", "FB"}
 
 
 def add_rolling_passing_yards(df: pd.DataFrame) -> pd.DataFrame:
@@ -126,6 +132,48 @@ def add_rolling_team_plays(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.Dat
 
     return qb_df.merge(
         plays[["team", "season", "week", "rolling_team_plays_3"]],
+        on=["team", "season", "week"],
+        how="left",
+    )
+
+
+def add_top_receiver_rolling(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.DataFrame:
+    # For each (team, season, week), compute the max rolling 3-game receiving
+    # yards across the team's receiving-position players.
+    receivers = (
+        full_df[full_df["position"].isin(RECEIVING_POSITIONS)]
+        .sort_values(["player_id", "season", "week"])
+        .copy()
+    )
+    receivers["rec_rolling"] = receivers.groupby("player_id")["receiving_yards"].transform(
+        lambda x: x.shift(1).rolling(3).mean()
+    )
+
+    # Max across the team's receivers per (team, season, week). NaN values in
+    # rec_rolling (early-season for that receiver) are skipped by .max().
+    # If any one receiver on the team has history, the team gets a value.
+    team_top = receivers.groupby(["team", "season", "week"], as_index=False)["rec_rolling"].max()
+    team_top = team_top.rename(columns={"rec_rolling": "rolling"})
+    team_top = team_top.sort_values(["team", "season", "week"]).reset_index(drop=True)
+
+    # Early-season fallback: prior-season average top-receiver-rolling for the team.
+    prior_season = (
+        team_top.groupby(["team", "season"], as_index=False)["rolling"]
+        .mean()
+        .rename(columns={"rolling": "prior_season_avg"})
+    )
+    prior_season["season"] = prior_season["season"] + 1
+    team_top = team_top.merge(prior_season, on=["team", "season"], how="left")
+
+    # League-wide fallback for the earliest season
+    league_avg = team_top["rolling"].mean()
+
+    team_top["top_receiver_rolling_yds_3"] = (
+        team_top["rolling"].fillna(team_top["prior_season_avg"]).fillna(league_avg)
+    )
+
+    return qb_df.merge(
+        team_top[["team", "season", "week", "top_receiver_rolling_yds_3"]],
         on=["team", "season", "week"],
         how="left",
     )
