@@ -7,6 +7,7 @@ from src.features import (
     add_rolling_pass_attempts,
     add_rolling_passing_yards,
     add_rolling_team_plays,
+    add_top_receiver_rolling,
 )
 
 
@@ -38,8 +39,28 @@ def _league_fixture() -> pd.DataFrame:
             "passing_yards": [200, 250, 220, 230, 280],
             "attempts": [25, 30, 20, 27, 32],
             "carries": [20, 25, 18, 22, 28],
+            "position": ["QB"] * 5,
         }
     )
+
+
+def _receivers_fixture() -> pd.DataFrame:
+    # Two KC receivers so the per-team max picks the higher one.
+    return pd.DataFrame(
+        {
+            "player_id": ["wr1"] * 5 + ["wr2"] * 5,
+            "team": ["KC"] * 10,
+            "position": ["WR"] * 5 + ["TE"] * 5,
+            "season": [2023] * 10,
+            "week": [1, 2, 3, 4, 5] * 2,
+            "receiving_yards": [80, 100, 60, 90, 110, 50, 70, 40, 60, 80],
+        }
+    )
+
+
+def _full_league_fixture() -> pd.DataFrame:
+    """League fixture + receivers for features that filter on position."""
+    return pd.concat([_league_fixture(), _receivers_fixture()], ignore_index=True)
 
 
 def test_feature_pipeline_produces_all_declared_features():
@@ -49,6 +70,7 @@ def test_feature_pipeline_produces_all_declared_features():
     qbs = add_rolling_epa_per_attempt(qbs)
     qbs = add_opponent_pass_defense(qbs, _league_fixture())
     qbs = add_rolling_team_plays(qbs, _league_fixture())
+    qbs = add_top_receiver_rolling(qbs, _full_league_fixture())
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
@@ -127,6 +149,50 @@ def test_rolling_team_plays_falls_back_to_prior_season_avg():
     result = add_rolling_team_plays(qbs, league)
     week1_2024 = result[(result["season"] == 2024) & (result["week"] == 1)]
     assert week1_2024["rolling_team_plays_3"].iloc[0] == 60
+
+
+def test_top_receiver_rolling_picks_max_among_team_receivers():
+    """Week 4 should reflect WR1's rolling (higher yards), not WR2's."""
+    result = add_top_receiver_rolling(_qb_fixture(), _full_league_fixture())
+    result = result.sort_values("week").reset_index(drop=True)
+
+    # WR1 rolling weeks 1-3: (80 + 100 + 60) / 3 = 80
+    # WR2 rolling weeks 1-3: (50 + 70 + 40) / 3 = 53.33...
+    # Max = 80 (WR1)
+    expected_w4 = (80 + 100 + 60) / 3
+    assert result.loc[result["week"] == 4, "top_receiver_rolling_yds_3"].iloc[0] == expected_w4
+
+
+def test_top_receiver_rolling_falls_back_to_prior_season_avg():
+    """Early weeks of season N use season N-1 team avg of top receiver rolling."""
+    qbs = pd.DataFrame(
+        {
+            "player_id": ["p1"] * 2,
+            "team": ["KC"] * 2,
+            "opponent_team": ["DEF"] * 2,
+            "season": [2024, 2024],
+            "week": [1, 2],
+        }
+    )
+    # WR1 played all of 2023 (avg 100 yds/game). Brand-new WR in 2024 week 1
+    # so current rolling is NaN. This forces the prior-season fallback.
+    league = pd.DataFrame(
+        {
+            "player_id": ["wr1"] * 5 + ["wr_new"],
+            "team": ["KC"] * 6,
+            "position": ["WR"] * 6,
+            "season": [2023, 2023, 2023, 2023, 2023, 2024],
+            "week": [1, 2, 3, 4, 5, 1],
+            "receiving_yards": [100, 100, 100, 100, 100, 50],
+        }
+    )
+    result = add_top_receiver_rolling(qbs, league)
+
+    # 2023 KC weekly top-rolling: NaN, NaN, NaN, 100, 100 → mean = 100.
+    # 2024 week 1 has only wr_new with no history → current rolling NaN
+    # → falls back to prior-season avg = 100.
+    week1_2024 = result[(result["season"] == 2024) & (result["week"] == 1)]
+    assert week1_2024["top_receiver_rolling_yds_3"].iloc[0] == 100
 
 
 def test_opponent_pass_defense_within_season_rolling():

@@ -12,6 +12,7 @@ from src.features import (
     add_rolling_pass_attempts,
     add_rolling_passing_yards,
     add_rolling_team_plays,
+    add_top_receiver_rolling,
 )
 
 TRAIN_SEASONS = [2020, 2021, 2022, 2023]
@@ -61,6 +62,7 @@ def build_training_set(df: pd.DataFrame):
     qbs = add_rolling_epa_per_attempt(qbs)
     qbs = add_opponent_pass_defense(qbs, df)  # full df: includes non-QB passers
     qbs = add_rolling_team_plays(qbs, df)  # full df: includes RB/WR carries
+    qbs = add_top_receiver_rolling(qbs, df)  # full df: receivers aren't in qbs
 
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
     _assert_no_extra_nans(qbs, FEATURE_COLS)
