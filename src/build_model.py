@@ -17,16 +17,26 @@ TEST_SEASONS = [2024, 2025]
 
 TARGET_COL = "passing_yards"
 
-# The "row universe": features whose missing values define which rows we
-# train and test on. Once a feature is in here, the row set is locked. New
-# features added to FEATURE_COLS must not introduce new missing values. If
-# they do, fix them in the feature code (impute/ widen the window/ etc.).
-# Otherwise the test set shifts under us and we can't compare runs.
+# Defines which rows enter train/test. New features
+# must impute NaN themselves rather than shrink this set, otherwise the
+# test rows shift between runs and metrics aren't comparable.
 ROW_INCLUSION_FEATURES = [
     "rolling_yds_3",
     "rolling_pass_atts_3",
     "opp_pass_yds_allowed_3",
 ]
+
+
+def _assert_no_extra_nans(df: pd.DataFrame, cols: list[str]) -> None:
+    """Fails loud if a feature has NaN inside the row universe. That means a
+    new feature is silently shrinking the test set. Impute at the feature level."""
+    bad = df[cols].isna().sum()
+    bad = bad[bad > 0]
+    if not bad.empty:
+        raise ValueError(
+            f"Feature(s) have NaN within row universe: {bad.to_dict()}. "
+            "Impute in the feature definition or widen the rolling window."
+        )
 
 
 def split_train_test(df: pd.DataFrame):
@@ -47,23 +57,11 @@ def build_training_set(df: pd.DataFrame):
     qbs = add_rolling_passing_yards(qbs)
     qbs = add_rolling_pass_attempts(qbs)
     qbs = add_rolling_epa_per_attempt(qbs)
-    # add_opponent_pass_defense needs the full league-wide df to compute yards
-    # allowed across all passers, not just QBs.
-    qbs = add_opponent_pass_defense(qbs, df)
-    # Stable row filter: drop only on ROW_INCLUSION_FEATURES + target.
-    # Adding more features to FEATURE_COLS no longer changes the row set.
+    qbs = add_opponent_pass_defense(qbs, df)  # full df: includes non-QB passers
+
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
-    # If any FEATURE_COLS still has NaN within the included rows, a recently
-    # added feature has a NaN pattern that doesn't match the inclusion
-    # universe. Fix the feature (impute or use a wider window) rather than
-    # quietly dropping rows here.
-    extra_nan = qbs[FEATURE_COLS].isna().sum()
-    bad = extra_nan[extra_nan > 0]
-    if not bad.empty:
-        raise ValueError(
-            f"Feature(s) have NaN within row-inclusion universe: {bad.to_dict()}. "
-            "Update the feature to impute or use a wider window."
-        )
+    _assert_no_extra_nans(qbs, FEATURE_COLS)
+
     return split_train_test(qbs)
 
 
@@ -72,9 +70,8 @@ def train_linear_regression(X_train, Y_train) -> LinearRegression:
 
 
 def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
-    # Since we have so few features and so little data at the moment, the default
-    # lgbm parameters were causing some overfitting. These are some
-    # tweaks i found that helped a bit, but we should keep an eye on this as we add more features
+    # Tuned down from defaults to suppress overfit on small feature set / data.
+    # Revisit as features and seasons grow.
     return LGBMRegressor(
         n_estimators=200,
         learning_rate=0.03,
