@@ -218,20 +218,23 @@ jobs:
                   );
                   const ablEntry = ablation.find((a) => a.label === label);
                   const ablRows = ablEntry ? ablEntry.ablation : [];
+                  const nFolds = ablEntry ? ablEntry.n_folds : null;
                   // If we have ablation, order rows by ablation Δ descending;
                   // otherwise fall back to permutation order.
                   const rows = ablEntry
                     ? ablRows.map((row) => {
                         const perm = impLookup[row.feature] ?? 0;
-                        return `| ${row.feature} | ${perm.toFixed(2)} | ${row.delta_mean >= 0 ? '+' : ''}${row.delta_mean.toFixed(2)} ± ${row.delta_std.toFixed(2)} |`;
+                        const sign = row.delta_mean >= 0 ? '+' : '';
+                        const folds = nFolds ? `${row.n_positive}/${nFolds}` : '—';
+                        return `| ${row.feature} | ${perm.toFixed(2)} | ${sign}${row.delta_mean.toFixed(2)} ± ${row.delta_std.toFixed(2)} | ${folds} |`;
                       })
                     : impEntry.importance.map(
-                        (i) => `| ${i.feature} | ${i.value.toFixed(2)} | — |`
+                        (i) => `| ${i.feature} | ${i.value.toFixed(2)} | — | — |`
                       );
                   return (
                     `### ${label}\n\n` +
-                    `| Feature | Permutation | Ablation Δ MAE |\n` +
-                    `|---|---|---|\n` +
+                    `| Feature | Permutation | Ablation Δ MAE | Folds + |\n` +
+                    `|---|---|---|---|\n` +
                     rows.join('\n')
                   );
                 });
@@ -240,8 +243,10 @@ jobs:
                   `Permutation = how much the trained model uses each feature ` +
                   `(MAE worsening when its values are shuffled). Ablation Δ = ` +
                   `how much MAE worsens if the model is retrained without it. ` +
-                  `Disagreement is informative: high permutation + low ablation = ` +
-                  `redundant (model uses it but doesn't need it); low permutation + ` +
+                  `Folds + = how many folds had a positive ablation Δ (sign ` +
+                  `consistency, more reliable than mean alone when std is large). ` +
+                  `Disagreement between permutation and ablation is informative: ` +
+                  `high permutation + low ablation = redundant; low permutation + ` +
                   `high ablation = unique contributor.\n\n` +
                   sections.join('\n\n');
               }

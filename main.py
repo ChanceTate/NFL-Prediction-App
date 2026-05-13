@@ -71,18 +71,27 @@ def _aggregate_importance(per_fold: dict[str, list[pd.Series]]) -> list[dict]:
 
 
 def _aggregate_ablation(per_fold: dict[str, list[pd.Series]]) -> list[dict]:
-    """Mean and stddev of ablation Δ per feature across folds. Stddev gives
-    a sense of how stable the contribution is across folds."""
+    """Mean, stddev, and per-fold sign count of ablation delta per feature.
+    n_positive tells you how many folds the feature helped in (more reliable
+    than mean alone when std is large)."""
     out = []
     for label, deltas_per_fold in per_fold.items():
         stacked = pd.concat(deltas_per_fold, axis=1)
         mean = stacked.mean(axis=1).sort_values(ascending=False)
         std = stacked.std(axis=1, ddof=1)
+        n_positive = (stacked > 0).sum(axis=1)
+        n_folds = stacked.shape[1]
         out.append(
             {
                 "label": label,
+                "n_folds": int(n_folds),
                 "ablation": [
-                    {"feature": f, "delta_mean": float(mean[f]), "delta_std": float(std[f])}
+                    {
+                        "feature": f,
+                        "delta_mean": float(mean[f]),
+                        "delta_std": float(std[f]),
+                        "n_positive": int(n_positive[f]),
+                    }
                     for f in mean.index
                 ],
             }
@@ -157,17 +166,22 @@ def main():
             f"R²={m['r2_mean']:5.2f} ± {m['r2_std']:.2f}"
         )
 
-    # Combined permutation + ablation per model, ordered by ablation Δ.
+    # Combined permutation + ablation per model, ordered by ablation delta.
+    # Sign count (n_pos / n_folds) is the cleanest "is this real" signal when
+    # std is large: 6/7 folds positive is meaningful even if magnitude is small.
     for label in ANALYSIS_MODELS:
         imp = next(e for e in importance_results if e["label"] == label)
         abl = next(e for e in ablation_results if e["label"] == label)
         imp_lookup = {i["feature"]: i["value"] for i in imp["importance"]}
+        n_folds = abl["n_folds"]
 
-        print(f"\n{label} feature analysis (mean across folds):")
-        print(f"  {'feature':30} {'permutation':>12} {'ablation delta':>15}")
+        print(f"\n{label} feature analysis (mean across {n_folds} folds):")
+        print(f"  {'feature':30} {'permutation':>12} {'ablation delta':>20} {'folds +':>9}")
         for item in abl["ablation"]:
             f = item["feature"]
-            print(f"  {f:30} {imp_lookup.get(f, 0.0):12.2f} {item['delta_mean']:+13.2f}")
+            delta_str = f"{item['delta_mean']:+.2f} ± {item['delta_std']:.2f}"
+            sign_str = f"{item['n_positive']}/{n_folds}"
+            print(f"  {f:30} {imp_lookup.get(f, 0.0):12.2f} {delta_str:>20} {sign_str:>9}")
 
 
 if __name__ == "__main__":
