@@ -6,6 +6,7 @@ from src.features import (
     add_rolling_epa_per_attempt,
     add_rolling_pass_attempts,
     add_rolling_passing_yards,
+    add_rolling_team_plays,
 )
 
 
@@ -27,12 +28,16 @@ def _qb_fixture() -> pd.DataFrame:
 def _league_fixture() -> pd.DataFrame:
     # The only defense in this fixture ("DEF") allowed exactly the QB's passing
     # yards each week, so the rolling expectation is easy to compute by hand.
+    # carries/attempts also let the same fixture serve add_rolling_team_plays.
     return pd.DataFrame(
         {
+            "team": ["KC"] * 5,
             "opponent_team": ["DEF"] * 5,
             "season": [2023] * 5,
             "week": [1, 2, 3, 4, 5],
             "passing_yards": [200, 250, 220, 230, 280],
+            "attempts": [25, 30, 20, 27, 32],
+            "carries": [20, 25, 18, 22, 28],
         }
     )
 
@@ -43,6 +48,7 @@ def test_feature_pipeline_produces_all_declared_features():
     qbs = add_rolling_pass_attempts(qbs)
     qbs = add_rolling_epa_per_attempt(qbs)
     qbs = add_opponent_pass_defense(qbs, _league_fixture())
+    qbs = add_rolling_team_plays(qbs, _league_fixture())
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
@@ -86,6 +92,41 @@ def test_rolling_epa_per_attempt_imputes_zero_for_backup_qbs():
     # Week 4 has 3 prior games to roll over, all with 0 attempts should impute
     # to 0 (not NaN) so backup-becoming-starter rows aren't silently dropped.
     assert result.loc[result["week"] == 4, "rolling_epa_per_att_3"].iloc[0] == 0
+
+
+def test_rolling_team_plays_within_season_rolling():
+    """Week 4+ uses 3-game rolling of prior weeks' team plays (attempts + carries)."""
+    result = add_rolling_team_plays(_qb_fixture(), _league_fixture())
+    result = result.sort_values("week").reset_index(drop=True)
+
+    # Plays = attempts + carries by week: 45, 55, 38, 49, 60
+    expected_w4 = (45 + 55 + 38) / 3
+    assert result.loc[result["week"] == 4, "rolling_team_plays_3"].iloc[0] == expected_w4
+
+
+def test_rolling_team_plays_falls_back_to_prior_season_avg():
+    """Early weeks of season N use season N-1's full-season average for that team."""
+    qbs = pd.DataFrame(
+        {
+            "player_id": ["p1"] * 2,
+            "team": ["KC"] * 2,
+            "opponent_team": ["DEF"] * 2,
+            "season": [2024, 2024],
+            "week": [1, 2],
+        }
+    )
+    league = pd.DataFrame(
+        {
+            "team": ["KC"] * 6,
+            "season": [2023, 2023, 2023, 2023, 2023, 2024],
+            "week": [1, 2, 3, 4, 5, 1],
+            "attempts": [30, 35, 40, 25, 50, 30],
+            "carries": [20, 25, 30, 15, 30, 25],
+        }
+    )
+    result = add_rolling_team_plays(qbs, league)
+    week1_2024 = result[(result["season"] == 2024) & (result["week"] == 1)]
+    assert week1_2024["rolling_team_plays_3"].iloc[0] == 60
 
 
 def test_opponent_pass_defense_within_season_rolling():
