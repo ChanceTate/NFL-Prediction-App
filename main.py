@@ -6,6 +6,7 @@ from sklearn.dummy import DummyRegressor
 from src.build_model import (
     build_training_set,
     evaluate,
+    feature_importance,
     train_lightgbm,
     train_linear_regression,
 )
@@ -28,6 +29,11 @@ def main():
 
     # Structured copy of the same numbers. CI parses this to compute deltas.
     Path("metrics.json").write_text(json.dumps(results, indent=2))
+
+    for label, model in [("LinearRegression", lr), ("LightGBM", lgbm)]:
+        print(f"\n{label} feature importance (MAE worsening when shuffled):")
+        importance = feature_importance(model, X_test, Y_test)
+        print(importance.to_string(float_format=lambda v: f"{v:6.2f}"))
 
 
 if __name__ == "__main__":
