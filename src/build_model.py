@@ -12,6 +12,7 @@ from src.features import (
     add_qb_vs_defense_history,
     add_rolling_epa_per_attempt,
     add_rolling_pass_attempts,
+    add_rolling_pass_fd_per_att,
     add_rolling_passing_yards,
     add_rolling_team_plays,
     add_rolling_yds_slope,
@@ -96,6 +97,7 @@ def build_training_set(
     qbs = add_qb_vs_defense_history(qbs)
     qbs = add_rolling_yds_slope(qbs)
     qbs = add_last_game_vs_season_avg(qbs)
+    qbs = add_rolling_pass_fd_per_att(qbs)
 
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
     _assert_no_extra_nans(qbs, FEATURE_COLS)
