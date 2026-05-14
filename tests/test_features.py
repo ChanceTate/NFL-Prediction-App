@@ -2,6 +2,7 @@ import pandas as pd
 
 from src.features import (
     FEATURE_COLS,
+    add_last_game_vs_season_avg,
     add_opponent_pass_defense,
     add_qb_vs_defense_history,
     add_rolling_epa_per_attempt,
@@ -75,6 +76,7 @@ def test_feature_pipeline_produces_all_declared_features():
     qbs = add_top_receiver_rolling(qbs, _full_league_fixture())
     qbs = add_qb_vs_defense_history(qbs)
     qbs = add_rolling_yds_slope(qbs)
+    qbs = add_last_game_vs_season_avg(qbs)
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
@@ -336,3 +338,27 @@ def test_rolling_yds_slope_uses_only_prior_games():
     # Week 5: slope from games 2, 3, 4 is (yards_w4 - yards_w2) / 2 = (230 - 250) / 2 = -10.
     expected_w5 = (230 - 250) / 2
     assert result.loc[result["week"] == 5, "rolling_yds_slope_3"].iloc[0] == expected_w5
+
+
+def test_last_game_vs_season_avg_uses_only_prior_games():
+    """Gap feature: previous game's yards minus QB's season-to-date avg.
+    Both pieces must use shift(1) so the current game doesn't leak in."""
+    result = add_last_game_vs_season_avg(_qb_fixture()).sort_values("week").reset_index(drop=True)
+
+    # Week 1: no prior game, season avg also NaN. Falls back to 0 by design.
+    w1 = result.loc[result["week"] == 1, "last_game_vs_season_avg"].iloc[0]
+    assert w1 == 0
+
+    # Week 2: last game = week 1 (200), season avg = mean of [200] = 200, diff = 0.
+    w2 = result.loc[result["week"] == 2, "last_game_vs_season_avg"].iloc[0]
+    assert w2 == 0
+
+    # Week 3: last game = week 2 (250), season avg = mean([200, 250]) = 225, diff = +25.
+    w3 = result.loc[result["week"] == 3, "last_game_vs_season_avg"].iloc[0]
+    assert w3 == 250 - 225
+
+    # Week 4: last game = week 3 (220), season avg = mean([200, 250, 220]) = 223.33,
+    # diff = 220 - 223.33 = -3.33.
+    season_avg_at_w4 = (200 + 250 + 220) / 3
+    w4 = result.loc[result["week"] == 4, "last_game_vs_season_avg"].iloc[0]
+    assert w4 == 220 - season_avg_at_w4
