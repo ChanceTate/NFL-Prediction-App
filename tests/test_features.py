@@ -3,6 +3,7 @@ import pandas as pd
 from src.features import (
     FEATURE_COLS,
     add_opponent_pass_defense,
+    add_qb_vs_defense_history,
     add_rolling_epa_per_attempt,
     add_rolling_pass_attempts,
     add_rolling_passing_yards,
@@ -71,6 +72,7 @@ def test_feature_pipeline_produces_all_declared_features():
     qbs = add_opponent_pass_defense(qbs, _league_fixture())
     qbs = add_rolling_team_plays(qbs, _league_fixture())
     qbs = add_top_receiver_rolling(qbs, _full_league_fixture())
+    qbs = add_qb_vs_defense_history(qbs)
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
@@ -247,3 +249,70 @@ def test_opponent_pass_defense_falls_back_to_prior_season_avg():
 
     week1_2024 = result[(result["season"] == 2024) & (result["week"] == 1)]
     assert week1_2024["opp_pass_yds_allowed_3"].iloc[0] == 300
+
+
+def test_qb_vs_defense_history_uses_only_prior_matchups():
+    """Repeated matchups against the same defense should give expanding mean
+    of prior games only. Current game must not leak in."""
+    # Mahomes vs DEF in weeks 1, 3, 5 (each with different yards). Weeks 2 and
+    # 4 are non-DEF games to make sure they don't pollute the matchup average.
+    qbs = pd.DataFrame(
+        {
+            "player_id": ["mahomes"] * 5,
+            "opponent_team": ["DEF", "OTHER", "DEF", "OTHER", "DEF"],
+            "season": [2023] * 5,
+            "week": [1, 2, 3, 4, 5],
+            "passing_yards": [200, 250, 220, 230, 280],
+        }
+    )
+    result = add_qb_vs_defense_history(qbs).sort_values("week").reset_index(drop=True)
+
+    # Week 3 vs DEF: only prior DEF matchup is week 1 (200). Mean of [200] = 200.
+    w3 = result.loc[result["week"] == 3, "qb_vs_def_avg_yds"].iloc[0]
+    assert w3 == 200
+
+    # Week 5 vs DEF: prior DEF matchups are weeks 1 and 3 (200, 220). Mean = 210.
+    w5 = result.loc[result["week"] == 5, "qb_vs_def_avg_yds"].iloc[0]
+    assert w5 == 210
+
+
+def test_qb_vs_defense_history_falls_back_to_career_avg_for_new_defense():
+    """When the QB has career history but has never faced this specific defense,
+    fall back to QB's career-to-date passing yards average."""
+    qbs = pd.DataFrame(
+        {
+            "player_id": ["mahomes"] * 4,
+            "opponent_team": ["DEF_A", "DEF_A", "DEF_A", "DEF_B"],  # Week 4 = new defense
+            "season": [2023] * 4,
+            "week": [1, 2, 3, 4],
+            "passing_yards": [200, 250, 220, 230],
+        }
+    )
+    result = add_qb_vs_defense_history(qbs).sort_values("week").reset_index(drop=True)
+
+    # Week 4 is Mahomes' first game vs DEF_B, so matchup_avg is NaN. Fallback
+    # is his career-to-date avg: mean of weeks 1, 2, 3 = (200+250+220)/3 = 223.33...
+    expected = (200 + 250 + 220) / 3
+    w4 = result.loc[result["week"] == 4, "qb_vs_def_avg_yds"].iloc[0]
+    assert w4 == expected
+
+
+def test_qb_vs_defense_history_falls_back_to_league_avg_for_first_game():
+    """A QB's very first NFL game has no matchup history AND no career history.
+    Should fall back to the league-wide average (mean of all passing_yards in df)."""
+    qbs = pd.DataFrame(
+        {
+            "player_id": ["rookie", "vet", "vet"],
+            "opponent_team": ["DEF_A", "DEF_B", "DEF_C"],
+            "season": [2023] * 3,
+            "week": [1, 1, 2],
+            "passing_yards": [180, 250, 270],
+        }
+    )
+    result = add_qb_vs_defense_history(qbs)
+
+    # Rookie's only game has no matchup history and no career history. Falls
+    # all the way to league avg = mean of [180, 250, 270] = 233.33...
+    league_avg = (180 + 250 + 270) / 3
+    rookie_w1 = result[(result["player_id"] == "rookie") & (result["week"] == 1)]
+    assert rookie_w1["qb_vs_def_avg_yds"].iloc[0] == league_avg

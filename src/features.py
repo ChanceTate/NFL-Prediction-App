@@ -7,6 +7,7 @@ FEATURE_COLS = [
     "rolling_epa_per_att_3",
     "rolling_team_plays_3",
     "top_receiver_rolling_yds_3",
+    "qb_vs_def_avg_yds",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -177,3 +178,30 @@ def add_top_receiver_rolling(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.D
         on=["team", "season", "week"],
         how="left",
     )
+
+
+def add_qb_vs_defense_history(df: pd.DataFrame) -> pd.DataFrame:
+    # Sorting by player + chronology means each (player_id, opponent_team)
+    # subgroup is also chronologically ordered, which is what shift+expanding
+    # below relies on.
+    df = df.sort_values(["player_id", "season", "week"]).copy()
+
+    # Matchup-specific: this QB's mean passing yards in prior games against
+    # this defense. shift(1) excludes the current game; expanding takes mean
+    # of all prior matchups regardless of how many.
+    matchup_avg = df.groupby(["player_id", "opponent_team"])["passing_yards"].transform(
+        lambda x: x.shift(1).expanding(min_periods=1).mean()
+    )
+
+    # Fallback 1: QB's overall career-to-date average. Used when this QB has
+    # never faced this specific defense before, but does have other history.
+    career_avg = df.groupby("player_id")["passing_yards"].transform(
+        lambda x: x.shift(1).expanding(min_periods=1).mean()
+    )
+
+    # Fallback 2: league-wide average. Catches the QB's first ever NFL game,
+    # where neither matchup nor career history exists.
+    league_avg = df["passing_yards"].mean()
+
+    df["qb_vs_def_avg_yds"] = matchup_avg.fillna(career_avg).fillna(league_avg)
+    return df
