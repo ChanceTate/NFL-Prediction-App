@@ -5,8 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
+  lint-and-test:
+    name: lint / test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +35,89 @@ jobs:
 
       - name: Run pytest
         run: uv run pytest
+
+  metrics:
+    name: run model / capture metrics
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      # Cache the nflreadpy data so reruns are fast. Key busts whenever
+      # src/data.py changes (e.g. season list updates). Path is the whole
+      # data/ directory so the cache survives filename changes (the parquet
+      # name now includes the season range).
+      - name: Cache player stats parquet
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: player-stats-${{ hashFiles('src/data.py') }}
+
+      - name: Run model and capture metrics
+        run: uv run main.py | tee metrics.txt
+
+      - name: Add metrics to job summary
+        run: |
+          {
+            echo "## Model metrics"
+            echo
+            echo '```'
+            cat metrics.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics
+          path: |
+            metrics.txt
+            metrics.json
+            importance.json
+            ablation.json
+
+      # Find the most recent successful main-branch CI run so we can pull its
+      # metrics artifact and compute changes. Returns '' on the first PR.
+      - name: Find latest main run id
+        id: find-main-run
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const findMainRun = require('./.github/scripts/find-main-run.js');
+            return await findMainRun({ github, context, core });
+
+      - name: Download baseline metrics from main
+        if: github.event_name == 'pull_request' && steps.find-main-run.outputs.result != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: metrics
+          path: baseline/
+          run-id: ${{ steps.find-main-run.outputs.result }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Post comment with deltas, fail on regression
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          MAIN_RUN_ID: ${{ steps.find-main-run.outputs.result }}
+        with:
+          script: |
+            const post = require('./.github/scripts/post-metrics-comment.js');
+            await post({ github, context, core });
