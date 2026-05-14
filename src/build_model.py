@@ -84,6 +84,7 @@ def split_train_test(
 
 def build_training_set(
     df: pd.DataFrame,
+    schedules: pd.DataFrame,
     train_seasons: list[int],
     test_seasons: list[int],
 ):
@@ -99,7 +100,7 @@ def build_training_set(
     qbs = add_rolling_yds_slope(qbs)
     qbs = add_last_game_vs_season_avg(qbs)
     qbs = add_rolling_pass_fd_per_att(qbs)
-    qbs = add_rolling_team_points(qbs)
+    qbs = add_rolling_team_points(qbs, schedules)
 
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
     _assert_no_extra_nans(qbs, FEATURE_COLS)

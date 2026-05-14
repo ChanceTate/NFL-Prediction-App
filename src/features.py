@@ -1,7 +1,5 @@
 import pandas as pd
 
-from src import data
-
 # Schedules carry historical codes (SD/OAK) for pre-relocation seasons while
 # player_stats uses the current codes. Normalize before joining.
 _SCHEDULE_TEAM_REMAP = {"SD": "LAC", "OAK": "LV"}
@@ -167,12 +165,9 @@ def add_rolling_team_plays(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.Dat
     )
 
 
-def add_rolling_team_points(qb_df: pd.DataFrame) -> pd.DataFrame:
+def add_rolling_team_points(qb_df: pd.DataFrame, schedules: pd.DataFrame) -> pd.DataFrame:
     # Game-script proxy. Teams that have been losing recently throw more in the
-    # next game (they're trailing more often). Built from schedules' home_score
-    # and away_score columns, stacked so each (season, week, team) maps to that
-    # team's points in that game.
-    schedules = data.load_schedules()
+    # next game
     home = schedules[["season", "week", "home_team", "home_score"]].rename(
         columns={"home_team": "team", "home_score": "points"}
     )

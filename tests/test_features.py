@@ -1,6 +1,5 @@
 import pandas as pd
 
-from src import data
 from src.features import (
     FEATURE_COLS,
     add_last_game_vs_season_avg,
@@ -85,9 +84,7 @@ def _schedules_fixture() -> pd.DataFrame:
     )
 
 
-def test_feature_pipeline_produces_all_declared_features(monkeypatch):
-    monkeypatch.setattr(data, "load_schedules", _schedules_fixture)
-
+def test_feature_pipeline_produces_all_declared_features():
     qbs = _qb_fixture()
     qbs = add_rolling_passing_yards(qbs)
     qbs = add_rolling_pass_attempts(qbs)
@@ -99,29 +96,27 @@ def test_feature_pipeline_produces_all_declared_features(monkeypatch):
     qbs = add_rolling_yds_slope(qbs)
     qbs = add_last_game_vs_season_avg(qbs)
     qbs = add_rolling_pass_fd_per_att(qbs)
-    qbs = add_rolling_team_points(qbs)
+    qbs = add_rolling_team_points(qbs, _schedules_fixture())
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
 
 
-def test_rolling_team_points_uses_only_prior_games(monkeypatch):
-    """Volume-weighted rate of first downs per attempt should use only the
-    QB's prior games. Same shift(1).rolling(3) pattern as the other rate
-    features."""
-    monkeypatch.setattr(data, "load_schedules", _schedules_fixture)
+def test_rolling_team_points_uses_only_prior_games():
+    """Rolling team points should use only prior games. Same shift(1).rolling(3)
+    pattern as the other team-level features."""
+    result = (
+        add_rolling_team_points(_qb_fixture(), _schedules_fixture())
+        .sort_values("week")
+        .reset_index(drop=True)
+    )
 
-    result = add_rolling_team_points(_qb_fixture()).sort_values("week").reset_index(drop=True)
-
-    # Weeks 1-3: not enough prior games for the 3-game rolling, so the raw
-    # rolling is NaN — but the prior-season fallback would also fail (no 2022
-    # data in fixture) and league avg kicks in. Just verify week 4 is the
-    # straight rolling mean of the prior 3 KC scores.
+    # Week 4 should be the straight rolling mean of the prior 3 KC scores.
     expected_w4 = (21 + 28 + 14) / 3
     assert result.loc[result["week"] == 4, "rolling_team_points_3"].iloc[0] == expected_w4
 
 
-def test_rolling_team_points_handles_team_relocations(monkeypatch):
+def test_rolling_team_points_handles_team_relocations():
     """SD and OAK rows in schedules should be remapped to LAC/LV so the merge
     with player_stats (which uses current codes) doesn't silently miss."""
     qbs = pd.DataFrame(
@@ -135,21 +130,22 @@ def test_rolling_team_points_handles_team_relocations(monkeypatch):
             "attempts": [25, 30, 20, 27],
         }
     )
+    schedules_with_old_codes = pd.DataFrame(
+        {
+            "season": [2016] * 4,
+            "week": [1, 2, 3, 4],
+            "home_team": ["SD"] * 4,  # historical Chargers code
+            "away_team": ["DEF"] * 4,
+            "home_score": [21, 28, 14, 31],
+            "away_score": [14, 21, 20, 17],
+        }
+    )
 
-    def schedules_with_old_codes():
-        return pd.DataFrame(
-            {
-                "season": [2016] * 4,
-                "week": [1, 2, 3, 4],
-                "home_team": ["SD"] * 4,  # historical Chargers code
-                "away_team": ["DEF"] * 4,
-                "home_score": [21, 28, 14, 31],
-                "away_score": [14, 21, 20, 17],
-            }
-        )
-
-    monkeypatch.setattr(data, "load_schedules", schedules_with_old_codes)
-    result = add_rolling_team_points(qbs).sort_values("week").reset_index(drop=True)
+    result = (
+        add_rolling_team_points(qbs, schedules_with_old_codes)
+        .sort_values("week")
+        .reset_index(drop=True)
+    )
 
     # If the remap works, week 4 picks up the rolling of SD/LAC's prior 3 scores.
     expected_w4 = (21 + 28 + 14) / 3

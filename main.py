@@ -14,7 +14,7 @@ from src.build_model import (
     train_lightgbm,
     train_linear_regression,
 )
-from src.data import load_player_data
+from src.data import load_player_data, load_schedules
 
 # Models tracked across folds.
 TRACKED_MODELS = ["LinearRegression", "LightGBM", "Baseline (mean)"]
@@ -101,6 +101,7 @@ def _aggregate_ablation(per_fold: dict[str, list[pd.Series]]) -> list[dict]:
 
 def main():
     df = load_player_data()
+    schedules = load_schedules()
 
     fold_results: list[dict] = []
     per_fold_importance: dict[str, list[pd.Series]] = {label: [] for label in ANALYSIS_MODELS}
@@ -108,7 +109,7 @@ def main():
 
     for fold in WALK_FORWARD_FOLDS:
         X_train, Y_train, X_test, Y_test = build_training_set(
-            df, train_seasons=fold["train"], test_seasons=fold["test"]
+            df, schedules, train_seasons=fold["train"], test_seasons=fold["test"]
         )
 
         lr = train_linear_regression(X_train, Y_train)
