@@ -24,7 +24,7 @@ from lightgbm import LGBMRegressor  # noqa: E402
 from sklearn.metrics import mean_absolute_error  # noqa: E402
 
 from src.build_model import WALK_FORWARD_FOLDS, build_training_set  # noqa: E402
-from src.data import load_player_data  # noqa: E402
+from src.data import load_player_data, load_schedules  # noqa: E402
 
 CURRENT = dict(
     n_estimators=200,
@@ -82,13 +82,16 @@ def evaluate_config(folds_data, params):
 
 def main():
     df = load_player_data()
+    schedules = load_schedules()
     # Pre-build folds once. build_training_set is a meaningful share of the
     # per-config cost; doing it once here saves significant runtime.
     print("Building folds...")
     folds_data = []
     for fold in WALK_FORWARD_FOLDS:
         folds_data.append(
-            build_training_set(df, train_seasons=fold["train"], test_seasons=fold["test"])
+            build_training_set(
+                df, schedules, train_seasons=fold["train"], test_seasons=fold["test"]
+            )
         )
     print(f"Built {len(folds_data)} folds.\n")
 
