@@ -1,5 +1,5 @@
 import pandas as pd
-from src.data import home_away
+
 FEATURE_COLS = [
     "rolling_yds_3",
     "rolling_pass_atts_3",
@@ -10,9 +10,6 @@ FEATURE_COLS = [
     "qb_vs_def_avg_yds",
     "rolling_yds_slope_3",
     "last_game_vs_season_avg",
-    "rolling_airyds_3",
-    "rolling_CPOE_3",
-    "rolling_home_away_3"
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -20,46 +17,12 @@ FEATURE_COLS = [
 # the per-team max).
 RECEIVING_POSITIONS = {"WR", "TE", "RB", "FB"}
 
-def add_home_away_rolling(df: pd.DataFrame) -> pd.DataFrame:
-    df = home_away(df)
-    df = df.sort_values(["player_id", "season", "week"]).copy()
-    df["rolling_home_away_3"] =(
-        df.groupby("player_id")["is_home"].transform(lambda x: x.shift(1).rolling(3, min_periods=1).mean())
-    )
-    return df
 
 def add_rolling_passing_yards(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["player_id", "season", "week"]).copy()
     df["rolling_yds_3"] = df.groupby("player_id")["passing_yards"].transform(
         lambda x: x.shift(1).rolling(3).mean()
     )
-    return df
-
-def add_rolling_passing_air_yards(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.sort_values(["player_id", "season", "week"]).copy()
-    df["rolling_airyds_3"] = df.groupby("player_id")["passing_air_yards"].transform(
-        lambda x: x.shift(1).rolling(3).mean()
-    )
-    return df
-"""
-def add_rolling_passing_yac(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.sort_values(["player_id", "season", "week"]).copy()
-    df["rolling_yac_3"] = df.groupby("player_id")["passing_yards_after_catch"].transform(
-        lambda x: x.shift(1).rolling(3).mean()
-    )
-    return df
-"""
-def add_rolling_CPOE(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.sort_values(["player_id", "season", "week"]).copy()
-
-    df["passing_cpoe_filtered"] = df["passing_cpoe"].where(df["attempts"] >= 10)
-
-    df["rolling_CPOE_3"] = (
-        df.groupby("player_id")["passing_cpoe_filtered"]
-        .transform(lambda x: x.shift(1).rolling(3, min_periods=2).mean())
-        .fillna(0)
-    )
-
     return df
 
 
