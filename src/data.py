@@ -23,10 +23,14 @@ def filter_qbs(df: pd.DataFrame) -> pd.DataFrame:
 
 #function to add home and away teams, returns home as 0 and away as 1
 def home_away(df: pd.DataFrame) -> pd.DataFrame:
-    schedules = nfl.load_schedules([2020, 2021, 2022, 2023, 2024, 2025]).to_pandas()
+    schedules = nfl.load_schedules(SEASONS).to_pandas()
     df = df.merge(schedules[['game_id', 'home_team']], on='game_id', how='left')
 
-    df['home_away'] = (df['team'] != df['home_team']).astype(int)
+    df['is_home'] = (df['team'] == df['home_team']).astype(int)
+    df = df.drop(columns='home_team')
 
     return df
 
+#df = nfl.load_player_stats([2025])
+
+#print(df.columns)
