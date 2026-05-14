@@ -8,6 +8,7 @@ FEATURE_COLS = [
     "rolling_team_plays_3",
     "top_receiver_rolling_yds_3",
     "qb_vs_def_avg_yds",
+    "rolling_yds_slope_3",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -204,4 +205,14 @@ def add_qb_vs_defense_history(df: pd.DataFrame) -> pd.DataFrame:
     league_avg = df["passing_yards"].mean()
 
     df["qb_vs_def_avg_yds"] = matchup_avg.fillna(career_avg).fillna(league_avg)
+    return df
+
+
+def add_rolling_yds_slope(df: pd.DataFrame) -> pd.DataFrame:
+    # Direction of the QB's recent passing yards trend. For 3 evenly-spaced
+    # points the OLS slope simplifies to (last - first) / 2, so no fitting
+    # needed.
+    df = df.sort_values(["player_id", "season", "week"]).copy()
+    grouped = df.groupby("player_id")["passing_yards"]
+    df["rolling_yds_slope_3"] = (grouped.shift(1) - grouped.shift(3)) / 2
     return df

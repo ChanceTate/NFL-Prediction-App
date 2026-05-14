@@ -8,6 +8,7 @@ from src.features import (
     add_rolling_pass_attempts,
     add_rolling_passing_yards,
     add_rolling_team_plays,
+    add_rolling_yds_slope,
     add_top_receiver_rolling,
 )
 
@@ -73,6 +74,7 @@ def test_feature_pipeline_produces_all_declared_features():
     qbs = add_rolling_team_plays(qbs, _league_fixture())
     qbs = add_top_receiver_rolling(qbs, _full_league_fixture())
     qbs = add_qb_vs_defense_history(qbs)
+    qbs = add_rolling_yds_slope(qbs)
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
@@ -316,3 +318,21 @@ def test_qb_vs_defense_history_falls_back_to_league_avg_for_first_game():
     league_avg = (180 + 250 + 270) / 3
     rookie_w1 = result[(result["player_id"] == "rookie") & (result["week"] == 1)]
     assert rookie_w1["qb_vs_def_avg_yds"].iloc[0] == league_avg
+
+
+def test_rolling_yds_slope_uses_only_prior_games():
+    """Slope should use the QB's prior games only (no current-game leakage). For
+    3 evenly-spaced points the OLS slope equals (last - first) / 2."""
+    result = add_rolling_yds_slope(_qb_fixture()).sort_values("week").reset_index(drop=True)
+
+    # Weeks 1-3: shift(3) is NaN, so slope is NaN. Same NaN pattern as rolling_yds_3.
+    early = result.loc[result["week"].isin([1, 2, 3]), "rolling_yds_slope_3"]
+    assert early.isna().all(), "Early weeks should be NaN. Current game is leaking in"
+
+    # Week 4: slope from games 1, 2, 3 is (yards_w3 - yards_w1) / 2 = (220 - 200) / 2 = 10.
+    expected_w4 = (220 - 200) / 2
+    assert result.loc[result["week"] == 4, "rolling_yds_slope_3"].iloc[0] == expected_w4
+
+    # Week 5: slope from games 2, 3, 4 is (yards_w4 - yards_w2) / 2 = (230 - 250) / 2 = -10.
+    expected_w5 = (230 - 250) / 2
+    assert result.loc[result["week"] == 5, "rolling_yds_slope_3"].iloc[0] == expected_w5
