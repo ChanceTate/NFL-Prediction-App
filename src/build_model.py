@@ -22,6 +22,10 @@ TARGET_COL = "passing_yards"
 # reflects test season difficulty, not "more data helps." We pay for that
 # cleaner variance by discarding the oldest training season each fold.
 WALK_FORWARD_FOLDS = [
+    {"train": [2016, 2017, 2018], "test": [2019]},
+    {"train": [2017, 2018, 2019], "test": [2020]},
+    {"train": [2018, 2019, 2020], "test": [2021]},
+    {"train": [2019, 2020, 2021], "test": [2022]},
     {"train": [2020, 2021, 2022], "test": [2023]},
     {"train": [2021, 2022, 2023], "test": [2024]},
     {"train": [2022, 2023, 2024], "test": [2025]},

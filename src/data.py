@@ -3,7 +3,7 @@ from pathlib import Path
 import nflreadpy as nfl
 import pandas as pd
 
-SEASONS = [2020, 2021, 2022, 2023, 2024, 2025]
+SEASONS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 # Cache filename includes the season range so changing SEASONS auto-busts the
 # cache instead of silently serving stale data.
 CACHE = Path(f"data/player_stats_{min(SEASONS)}-{max(SEASONS)}.parquet")
