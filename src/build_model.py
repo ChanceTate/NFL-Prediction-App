@@ -13,6 +13,7 @@ from src.features import (
     add_rolling_pass_attempts,
     add_rolling_passing_yards,
     add_rolling_team_plays,
+    add_rolling_yds_slope,
     add_top_receiver_rolling,
 )
 
@@ -92,6 +93,7 @@ def build_training_set(
     qbs = add_rolling_team_plays(qbs, df)  # full df: includes RB/WR carries
     qbs = add_top_receiver_rolling(qbs, df)  # full df: receivers aren't in qbs
     qbs = add_qb_vs_defense_history(qbs)
+    qbs = add_rolling_yds_slope(qbs)
 
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
     _assert_no_extra_nans(qbs, FEATURE_COLS)
@@ -122,10 +124,6 @@ def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
 def feature_importance(model, X_test, Y_test, n_repeats: int = 10) -> pd.Series:
     """Permutation importance: average MAE worsening when each feature is shuffled.
     Higher = more important.
-
-    Pairs with feature_ablation: this measures what the trained model USES;
-    ablation measures what the model NEEDS. They diverge when features are
-    redundant.
     """
     result = permutation_importance(
         model,
@@ -140,10 +138,10 @@ def feature_importance(model, X_test, Y_test, n_repeats: int = 10) -> pd.Series:
 
 def feature_ablation(train_func, X_train, Y_train, X_test, Y_test) -> pd.Series:
     """Leave-one-out ablation: for each feature, retrain the model without it
-    and measure the change in MAE. Returns Δ MAE per feature.
+    and measure the change in MAE. Returns delta MAE per feature.
 
-    Positive Δ = removing the feature hurt the model (feature was contributing
-    unique information). Negative Δ = removing the feature helped (feature was
+    Positive delta = removing the feature hurt the model (feature was contributing
+    unique information). Negative delta = removing the feature helped (feature was
     noise or fully redundant with others).
     """
     baseline = train_func(X_train, Y_train)
