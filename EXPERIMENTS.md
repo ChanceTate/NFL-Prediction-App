@@ -26,6 +26,7 @@ having to clear the harder magnitude bar alone.
 | rolling completion percentage | +0.01 (4/7) | +0.06 (4/7) | redundant with EPA per attempt |
 | rolling CPOE (volume-weighted) | -0.04 (2/7) | +0.09 (4/7) | efficiency rate, collides with `rolling_epa_per_att_3` |
 | rolling home/away share | -0.05 (3/7) | +0.01 (3/7) | weak signal even after fixing the game_id join bug |
+| rolling opponent team plays (pace) | -0.03 (2/7) | +0.00 (4/7) | a QB's own `rolling_pass_atts_3` already implicitly reflects whether they face fast-paced opponents, so the explicit feature adds nothing |
 
 ## Kept
 
@@ -41,10 +42,11 @@ having to clear the harder magnitude bar alone.
 | `rolling_yds_slope_3` | direction of recent passing yards trend |
 | `last_game_vs_season_avg` | gap from QB's season-to-date avg |
 | `rolling_pass_fd_per_att_3` | drive sustainability. first downs earned through the air, per attempt |
+| `rolling_team_points_3` | recent team scoring. game-script proxy: teams that have been losing throw more (LGBM +0.16, 6/7) |
 
 ## Current state
 
-- LR: 68.3 MAE ± 2.2
-- LGBM: 67.3 MAE ± 2.2
+- LR: 68.4 MAE ± 2.2
+- LGBM: 67.2 MAE ± 2.1
 - Baseline (mean): 81.0 MAE ± 3.5
 - Noise floor estimate without Vegas: ~50-55 MAE

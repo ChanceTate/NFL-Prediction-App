@@ -1,5 +1,11 @@
 import pandas as pd
 
+from src import data
+
+# Schedules carry historical codes (SD/OAK) for pre-relocation seasons while
+# player_stats uses the current codes. Normalize before joining.
+_SCHEDULE_TEAM_REMAP = {"SD": "LAC", "OAK": "LV"}
+
 FEATURE_COLS = [
     "rolling_yds_3",
     "rolling_pass_atts_3",
@@ -11,6 +17,7 @@ FEATURE_COLS = [
     "rolling_yds_slope_3",
     "last_game_vs_season_avg",
     "rolling_pass_fd_per_att_3",
+    "rolling_team_points_3",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -155,6 +162,50 @@ def add_rolling_team_plays(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.Dat
 
     return qb_df.merge(
         plays[["team", "season", "week", "rolling_team_plays_3"]],
+        on=["team", "season", "week"],
+        how="left",
+    )
+
+
+def add_rolling_team_points(qb_df: pd.DataFrame) -> pd.DataFrame:
+    # Game-script proxy. Teams that have been losing recently throw more in the
+    # next game (they're trailing more often). Built from schedules' home_score
+    # and away_score columns, stacked so each (season, week, team) maps to that
+    # team's points in that game.
+    schedules = data.load_schedules()
+    home = schedules[["season", "week", "home_team", "home_score"]].rename(
+        columns={"home_team": "team", "home_score": "points"}
+    )
+    away = schedules[["season", "week", "away_team", "away_score"]].rename(
+        columns={"away_team": "team", "away_score": "points"}
+    )
+    team_pts = pd.concat([home, away], ignore_index=True)
+    team_pts["team"] = team_pts["team"].replace(_SCHEDULE_TEAM_REMAP)
+    team_pts = team_pts.sort_values(["team", "season", "week"]).reset_index(drop=True)
+
+    # Rolling within season so the feature reflects current-season scoring form.
+    team_pts["rolling"] = team_pts.groupby(["team", "season"])["points"].transform(
+        lambda x: x.shift(1).rolling(3).mean()
+    )
+
+    # Same fallback chain as other team features: current → prior-season team
+    # avg → league avg.
+    prior_season = (
+        team_pts.groupby(["team", "season"], as_index=False)["points"]
+        .mean()
+        .rename(columns={"points": "prior_season_avg"})
+    )
+    prior_season["season"] = prior_season["season"] + 1
+    team_pts = team_pts.merge(prior_season, on=["team", "season"], how="left")
+
+    league_avg = team_pts["points"].mean()
+
+    team_pts["rolling_team_points_3"] = (
+        team_pts["rolling"].fillna(team_pts["prior_season_avg"]).fillna(league_avg)
+    )
+
+    return qb_df.merge(
+        team_pts[["team", "season", "week", "rolling_team_points_3"]],
         on=["team", "season", "week"],
         how="left",
     )
