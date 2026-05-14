@@ -9,6 +9,7 @@ FEATURE_COLS = [
     "top_receiver_rolling_yds_3",
     "qb_vs_def_avg_yds",
     "rolling_yds_slope_3",
+    "last_game_vs_season_avg",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -215,4 +216,15 @@ def add_rolling_yds_slope(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["player_id", "season", "week"]).copy()
     grouped = df.groupby("player_id")["passing_yards"]
     df["rolling_yds_slope_3"] = (grouped.shift(1) - grouped.shift(3)) / 2
+    return df
+
+
+def add_last_game_vs_season_avg(df: pd.DataFrame) -> pd.DataFrame:
+    # Last game's passing yards minus the QB's season-to-date avg.
+    df = df.sort_values(["player_id", "season", "week"]).copy()
+    last_game = df.groupby("player_id")["passing_yards"].shift(1)
+    season_avg = df.groupby(["player_id", "season"])["passing_yards"].transform(
+        lambda x: x.shift(1).expanding().mean()
+    )
+    df["last_game_vs_season_avg"] = (last_game - season_avg).fillna(0)
     return df

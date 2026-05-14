@@ -7,6 +7,7 @@ from sklearn.metrics import mean_absolute_error
 from src.data import filter_qbs
 from src.features import (
     FEATURE_COLS,
+    add_last_game_vs_season_avg,
     add_opponent_pass_defense,
     add_qb_vs_defense_history,
     add_rolling_epa_per_attempt,
@@ -94,6 +95,7 @@ def build_training_set(
     qbs = add_top_receiver_rolling(qbs, df)  # full df: receivers aren't in qbs
     qbs = add_qb_vs_defense_history(qbs)
     qbs = add_rolling_yds_slope(qbs)
+    qbs = add_last_game_vs_season_avg(qbs)
 
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
     _assert_no_extra_nans(qbs, FEATURE_COLS)
