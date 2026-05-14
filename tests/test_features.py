@@ -7,6 +7,7 @@ from src.features import (
     add_qb_vs_defense_history,
     add_rolling_epa_per_attempt,
     add_rolling_pass_attempts,
+    add_rolling_pass_fd_per_att,
     add_rolling_passing_yards,
     add_rolling_team_plays,
     add_rolling_yds_slope,
@@ -25,6 +26,7 @@ def _qb_fixture() -> pd.DataFrame:
             "passing_yards": [200, 250, 220, 230, 280],
             "attempts": [25, 30, 20, 27, 32],
             "passing_epa": [10.0, 15.0, -5.0, 20.0, 8.0],
+            "passing_first_downs": [10, 13, 8, 12, 14],
         }
     )
 
@@ -77,9 +79,44 @@ def test_feature_pipeline_produces_all_declared_features():
     qbs = add_qb_vs_defense_history(qbs)
     qbs = add_rolling_yds_slope(qbs)
     qbs = add_last_game_vs_season_avg(qbs)
+    qbs = add_rolling_pass_fd_per_att(qbs)
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
+
+
+def test_rolling_pass_fd_per_att_uses_only_prior_games():
+    """Volume-weighted rate of first downs per attempt should use only the
+    QB's prior games. Same shift(1).rolling(3) pattern as the other rate
+    features."""
+    result = add_rolling_pass_fd_per_att(_qb_fixture()).sort_values("week").reset_index(drop=True)
+
+    # Weeks 1-3 have fewer than 3 prior games, so the rolling sum is NaN.
+    early = result.loc[result["week"].isin([1, 2, 3]), "rolling_pass_fd_per_att_3"]
+    assert early.isna().all(), "Early weeks should be NaN. Current game is leaking in"
+
+    # Week 4: volume-weighted rate over weeks 1-3.
+    # sum(fds) = 10 + 13 + 8 = 31; sum(atts) = 25 + 30 + 20 = 75; rate = 31/75
+    expected_w4 = (10 + 13 + 8) / (25 + 30 + 20)
+    assert result.loc[result["week"] == 4, "rolling_pass_fd_per_att_3"].iloc[0] == expected_w4
+
+
+def test_rolling_pass_fd_per_att_imputes_zero_for_backup_qbs():
+    """Backup QB with three prior games of 0 attempts should impute to 0
+    (no signal) rather than NaN, so the row stays in the universe."""
+    backup = pd.DataFrame(
+        {
+            "player_id": ["backup"] * 4,
+            "season": [2023] * 4,
+            "week": [1, 2, 3, 4],
+            "attempts": [0, 0, 0, 25],
+            "passing_first_downs": [0, 0, 0, 12],
+        }
+    )
+    result = add_rolling_pass_fd_per_att(backup).sort_values("week").reset_index(drop=True)
+
+    # Week 4 has 3 prior games with 0 attempts → impute 0 instead of NaN
+    assert result.loc[result["week"] == 4, "rolling_pass_fd_per_att_3"].iloc[0] == 0
 
 
 def test_rolling_passing_yards_uses_only_prior_games():

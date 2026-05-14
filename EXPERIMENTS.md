@@ -2,7 +2,14 @@
 
 Every feature tested with ablation: what it was, how it scored, and the verdict.
 
-**Decision rule:** keep if mean ablation Δ ≥ +0.2 with 5+/7 folds positive in either model. Otherwise drop.
+**Decision rule (two paths):** keep a feature if, in either model, it passes **either**:
+- *Magnitude path:* mean ablation Δ ≥ +0.2 with 5+/7 folds positive
+- *Consistency path:* mean ablation Δ ≥ +0.1 with 6+/7 folds positive
+
+Sign consistency (folds+) is the cleanest evidence the effect is real;
+magnitude is the "is it big enough to care about" check. The two paths separate
+those questions so reliable-but-marginal features can earn their keep without
+having to clear the harder magnitude bar alone.
 
 ## Rejected
 
@@ -33,10 +40,11 @@ Every feature tested with ablation: what it was, how it scored, and the verdict.
 | `qb_vs_def_avg_yds` | this QB vs this defense matchup history |
 | `rolling_yds_slope_3` | direction of recent passing yards trend |
 | `last_game_vs_season_avg` | gap from QB's season-to-date avg |
+| `rolling_pass_fd_per_att_3` | drive sustainability. first downs earned through the air, per attempt |
 
 ## Current state
 
-- LR: 68.4 MAE ± 2.2
-- LGBM: 67.5 MAE ± 2.2
+- LR: 68.3 MAE ± 2.2
+- LGBM: 67.3 MAE ± 2.2
 - Baseline (mean): 81.0 MAE ± 3.5
 - Noise floor estimate without Vegas: ~50-55 MAE

@@ -10,6 +10,7 @@ FEATURE_COLS = [
     "qb_vs_def_avg_yds",
     "rolling_yds_slope_3",
     "last_game_vs_season_avg",
+    "rolling_pass_fd_per_att_3",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -31,6 +32,25 @@ def add_rolling_pass_attempts(df: pd.DataFrame) -> pd.DataFrame:
     df["rolling_pass_atts_3"] = df.groupby("player_id")["attempts"].transform(
         lambda x: x.shift(1).rolling(3).mean()
     )
+    return df
+
+
+def add_rolling_pass_fd_per_att(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.sort_values(["player_id", "season", "week"]).copy()
+    # passing_first_downs is the count of pass plays that earned a first down.
+    # Fill NaN as 0 in case it's missing for any rows
+    fds = df["passing_first_downs"].fillna(0)
+
+    # Volume-weighted: sum(first_downs) / sum(attempts) over the prior 3 games.
+    rolling_fds = fds.groupby(df["player_id"]).transform(lambda x: x.shift(1).rolling(3).sum())
+    rolling_atts = df.groupby("player_id")["attempts"].transform(
+        lambda x: x.shift(1).rolling(3).sum()
+    )
+    ratio = rolling_fds / rolling_atts.where(rolling_atts != 0)
+    # Backups with 0 attempts across all 3 prior games: impute 0 (no signal) so
+    # the row stays in the universe instead of being dropped.
+    no_signal = rolling_atts.notna() & (rolling_atts == 0)
+    df["rolling_pass_fd_per_att_3"] = ratio.mask(no_signal, 0)
     return df
 
 
