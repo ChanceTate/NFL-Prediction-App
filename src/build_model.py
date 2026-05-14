@@ -104,14 +104,14 @@ def train_linear_regression(X_train, Y_train) -> LinearRegression:
 
 
 def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
-    # Tuned down from defaults to suppress overfit on small feature set / data.
-    # Revisit as features and seasons grow.
+    # Tuned via scripts/tune_lgbm.py.
     return LGBMRegressor(
         n_estimators=200,
         learning_rate=0.03,
-        num_leaves=8,
-        min_child_samples=30,
-        reg_lambda=1.0,
+        num_leaves=4,
+        min_child_samples=10,
+        reg_lambda=0.0,
+        colsample_bytree=0.5,
         subsample=0.8,
         subsample_freq=1,
         random_state=42,
