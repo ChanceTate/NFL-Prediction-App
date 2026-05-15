@@ -13,6 +13,7 @@ from src.features import (
     add_rolling_team_points,
     add_rolling_yds_slope,
     add_top_receiver_rolling,
+    add_weather,
 )
 
 
@@ -80,6 +81,8 @@ def _schedules_fixture() -> pd.DataFrame:
             "away_team": ["DEF"] * 5,
             "home_score": [21, 28, 14, 31, 24],
             "away_score": [14, 21, 20, 17, 27],
+            "roof": ["outdoors"] * 5,
+            "wind": [5, 8, 12, 7, 10],
         }
     )
 
@@ -97,6 +100,7 @@ def test_feature_pipeline_produces_all_declared_features():
     qbs = add_last_game_vs_season_avg(qbs)
     qbs = add_rolling_pass_fd_per_att(qbs)
     qbs = add_rolling_team_points(qbs, _schedules_fixture())
+    qbs = add_weather(qbs, _schedules_fixture())
 
     missing = set(FEATURE_COLS) - set(qbs.columns)
     assert not missing, f"Feature pipeline did not produce declared features: {missing}"
@@ -442,6 +446,64 @@ def test_rolling_yds_slope_uses_only_prior_games():
     # Week 5: slope from games 2, 3, 4 is (yards_w4 - yards_w2) / 2 = (230 - 250) / 2 = -10.
     expected_w5 = (230 - 250) / 2
     assert result.loc[result["week"] == 5, "rolling_yds_slope_3"].iloc[0] == expected_w5
+
+
+def test_add_weather_zeros_wind_for_indoor_games():
+    """Dome/closed-roof games should always get wind=0, regardless of the
+    schedule's wind value. Catches regressions where the indoor override is
+    removed, which would let stale/garbage wind values from indoor games
+    pollute the feature."""
+    qbs = pd.DataFrame(
+        {
+            "player_id": ["p1", "p2"],
+            "team": ["KC", "DET"],
+            "season": [2023, 2023],
+            "week": [1, 1],
+        }
+    )
+    schedules = pd.DataFrame(
+        {
+            "season": [2023, 2023],
+            "week": [1, 1],
+            "home_team": ["KC", "DET"],
+            "away_team": ["X1", "X2"],
+            "roof": ["outdoors", "dome"],
+            "wind": [10, 15],  # DET indoor with non-zero wind in source data
+        }
+    )
+    result = add_weather(qbs, schedules)
+
+    assert result.loc[result["team"] == "KC", "wind_speed"].iloc[0] == 10
+    assert result.loc[result["team"] == "DET", "wind_speed"].iloc[0] == 0
+
+
+def test_add_weather_imputes_missing_outdoor_with_outdoor_median():
+    """Outdoor games with missing wind get filled with the outdoor-only median.
+    Indoor zeros must be excluded from that median or the imputation gets
+    dragged toward zero."""
+    qbs = pd.DataFrame(
+        {
+            "player_id": ["p1", "p2", "p3", "p4"],
+            "team": ["A", "B", "C", "D"],
+            "season": [2023] * 4,
+            "week": [1] * 4,
+        }
+    )
+    schedules = pd.DataFrame(
+        {
+            "season": [2023] * 4,
+            "week": [1] * 4,
+            "home_team": ["A", "B", "C", "D"],
+            "away_team": ["X1", "X2", "X3", "X4"],
+            "roof": ["outdoors", "outdoors", "dome", "outdoors"],
+            # Outdoor non-NaN: [10, 20] → median 15.
+            # If indoor=0 leaked in, median would be 10 instead.
+            "wind": [10, 20, 5, float("nan")],
+        }
+    )
+    result = add_weather(qbs, schedules)
+
+    assert result.loc[result["team"] == "D", "wind_speed"].iloc[0] == 15
 
 
 def test_last_game_vs_season_avg_uses_only_prior_games():

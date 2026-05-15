@@ -34,25 +34,39 @@ def filter_qbs(df: pd.DataFrame) -> pd.DataFrame:
 
 # Team relocations: schedules carry the historical code, player_stats uses the
 # current one. Normalize schedules to match player_stats before joining.
-_TEAM_CODE_REMAP = {"SD": "LAC", "OAK": "LV"}
+TEAM_CODE_REMAP = {"SD": "LAC", "OAK": "LV"}
 
 
-def home_away(df: pd.DataFrame) -> pd.DataFrame:
-    """Attach an is_home (1/0) column to df by joining schedules on
-    (season, week, team). We avoid joining on game_id because nflreadpy's
-    player_stats has missing/inconsistent game_id values; (season, week, team)
-    is the canonical key — each team plays at most one game per week.
+def attach_schedule_columns(
+    df: pd.DataFrame, schedules: pd.DataFrame, cols: list[str]
+) -> pd.DataFrame:
+    """Attach schedule columns to df keyed on (season, week, team). cols must
+    be values shared by both teams in a game (roof, wind, surface, gameday,
+    referee, etc.).
+
+    Joining on (season, week, team) rather than game_id because player_stats'
+    game_ids are missing/inconsistent; each team plays at most one game per week.
     """
-    schedules = load_schedules().copy()
-    schedules["home_team"] = schedules["home_team"].replace(_TEAM_CODE_REMAP)
-    schedules["away_team"] = schedules["away_team"].replace(_TEAM_CODE_REMAP)
+    s = schedules.copy()
+    s["home_team"] = s["home_team"].replace(TEAM_CODE_REMAP)
+    s["away_team"] = s["away_team"].replace(TEAM_CODE_REMAP)
 
-    # Schedules has one row per game with both home_team and away_team. Stack
-    # to long form so each (season, week, team) maps cleanly to its is_home flag.
-    home_rows = schedules[["season", "week", "home_team"]].rename(columns={"home_team": "team"})
-    home_rows["is_home"] = 1
-    away_rows = schedules[["season", "week", "away_team"]].rename(columns={"away_team": "team"})
-    away_rows["is_home"] = 0
-    long = pd.concat([home_rows, away_rows], ignore_index=True)
+    home = s[["season", "week", "home_team", *cols]].rename(columns={"home_team": "team"})
+    away = s[["season", "week", "away_team", *cols]].rename(columns={"away_team": "team"})
+    long = pd.concat([home, away], ignore_index=True)
+    return df.merge(long, on=["season", "week", "team"], how="left")
 
+
+def home_away(df: pd.DataFrame, schedules: pd.DataFrame) -> pd.DataFrame:
+    """Attach an is_home (1/0) column to df. Per-side, so it doesn't fit the
+    attach_schedule_columns shape — needs its own stack."""
+    s = schedules.copy()
+    s["home_team"] = s["home_team"].replace(TEAM_CODE_REMAP)
+    s["away_team"] = s["away_team"].replace(TEAM_CODE_REMAP)
+
+    home = s[["season", "week", "home_team"]].rename(columns={"home_team": "team"})
+    home["is_home"] = 1
+    away = s[["season", "week", "away_team"]].rename(columns={"away_team": "team"})
+    away["is_home"] = 0
+    long = pd.concat([home, away], ignore_index=True)
     return df.merge(long, on=["season", "week", "team"], how="left")
