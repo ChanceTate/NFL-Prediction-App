@@ -12,18 +12,15 @@ from src.build_model import (
     feature_ablation,
     feature_importance,
     train_lightgbm,
-    train_linear_regression,
 )
 from src.data import load_player_data, load_schedules
 
-# Models tracked across folds.
-TRACKED_MODELS = ["LinearRegression", "LightGBM", "Baseline (mean)"]
-ANALYSIS_MODELS = ["LinearRegression", "LightGBM"]
-# Maps model label → training function for ablation re-training.
-TRAIN_FUNCS = {
-    "LinearRegression": train_linear_regression,
-    "LightGBM": train_lightgbm,
-}
+# Models tracked across folds. Baseline is a sanity floor — kept but not analyzed.
+# train_linear_regression still lives in build_model.py if we ever want to
+# re-enable it; just add it back here.
+TRACKED_MODELS = ["LightGBM", "Baseline (mean)"]
+ANALYSIS_MODELS = ["LightGBM"]
+TRAIN_FUNCS = {"LightGBM": train_lightgbm}
 
 
 def _evaluate(model, X_test, Y_test) -> dict:
@@ -112,12 +109,10 @@ def main():
             df, schedules, train_seasons=fold["train"], test_seasons=fold["test"]
         )
 
-        lr = train_linear_regression(X_train, Y_train)
         lgbm = train_lightgbm(X_train, Y_train)
         baseline = DummyRegressor(strategy="mean").fit(X_train, Y_train)
 
         fold_models = [
-            {"label": "LinearRegression", **_evaluate(lr, X_test, Y_test)},
             {"label": "LightGBM", **_evaluate(lgbm, X_test, Y_test)},
             {"label": "Baseline (mean)", **_evaluate(baseline, X_test, Y_test)},
         ]
@@ -131,11 +126,10 @@ def main():
             }
         )
 
-        for label, trained_model in [("LinearRegression", lr), ("LightGBM", lgbm)]:
-            per_fold_importance[label].append(feature_importance(trained_model, X_test, Y_test))
-            per_fold_ablation[label].append(
-                feature_ablation(TRAIN_FUNCS[label], X_train, Y_train, X_test, Y_test)
-            )
+        per_fold_importance["LightGBM"].append(feature_importance(lgbm, X_test, Y_test))
+        per_fold_ablation["LightGBM"].append(
+            feature_ablation(train_lightgbm, X_train, Y_train, X_test, Y_test)
+        )
 
     aggregate = _aggregate(fold_results)
     importance_results = _aggregate_importance(per_fold_importance)

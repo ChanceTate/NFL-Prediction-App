@@ -26,12 +26,16 @@ from sklearn.metrics import mean_absolute_error  # noqa: E402
 from src.build_model import WALK_FORWARD_FOLDS, build_training_set  # noqa: E402
 from src.data import load_player_data, load_schedules  # noqa: E402
 
+# Must mirror train_lightgbm in src/build_model.py. If they drift, the deltas
+# below compare against the wrong baseline and look misleadingly favorable.
 CURRENT = dict(
+    objective="regression_l1",
     n_estimators=200,
     learning_rate=0.03,
     num_leaves=8,
-    min_child_samples=30,
-    reg_lambda=1.0,
+    min_child_samples=10,
+    reg_lambda=0.0,
+    colsample_bytree=1.0,
     subsample=0.8,
     subsample_freq=1,
     random_state=42,
@@ -68,6 +72,9 @@ THEMES = {
     "heavy_subsample": {"subsample": 0.5, "colsample_bytree": 0.5},
     "minimal_reg": {"reg_lambda": 0.0, "reg_alpha": 0.0, "min_child_samples": 10},
     "max_reg": {"reg_lambda": 5.0, "reg_alpha": 1.0, "min_child_samples": 50},
+    # Combine the top single-param wins from the last sweep to see if they compound.
+    "more_leaves_faster_lr": {"num_leaves": 8, "learning_rate": 0.05},
+    "even_more_leaves_faster_lr": {"num_leaves": 12, "learning_rate": 0.05},
 }
 
 
