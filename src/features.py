@@ -1,8 +1,6 @@
 import pandas as pd
 
-# Schedules carry historical codes (SD/OAK) for pre-relocation seasons while
-# player_stats uses the current codes. Normalize before joining.
-_SCHEDULE_TEAM_REMAP = {"SD": "LAC", "OAK": "LV"}
+from src.data import TEAM_CODE_REMAP, attach_schedule_columns
 
 FEATURE_COLS = [
     "rolling_yds_3",
@@ -16,6 +14,7 @@ FEATURE_COLS = [
     "last_game_vs_season_avg",
     "rolling_pass_fd_per_att_3",
     "rolling_team_points_3",
+    "wind_speed",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -175,7 +174,7 @@ def add_rolling_team_points(qb_df: pd.DataFrame, schedules: pd.DataFrame) -> pd.
         columns={"away_team": "team", "away_score": "points"}
     )
     team_pts = pd.concat([home, away], ignore_index=True)
-    team_pts["team"] = team_pts["team"].replace(_SCHEDULE_TEAM_REMAP)
+    team_pts["team"] = team_pts["team"].replace(TEAM_CODE_REMAP)
     team_pts = team_pts.sort_values(["team", "season", "week"]).reset_index(drop=True)
 
     # Rolling within season so the feature reflects current-season scoring form.
@@ -283,6 +282,25 @@ def add_rolling_yds_slope(df: pd.DataFrame) -> pd.DataFrame:
     grouped = df.groupby("player_id")["passing_yards"]
     df["rolling_yds_slope_3"] = (grouped.shift(1) - grouped.shift(3)) / 2
     return df
+
+
+def add_weather(qb_df: pd.DataFrame, schedules: pd.DataFrame) -> pd.DataFrame:
+    # Wind decays high throws and the deep ball. Indoor games (dome/closed)
+    # carry no wind, so they get wind=0 the model can split on that to
+    # effectively ignore wind for indoor rows. Open-roof games are treated as
+    # outdoor since the roof being retracted at gametime is when wind mattered.
+    df = attach_schedule_columns(qb_df, schedules, ["roof", "wind"])
+
+    indoor_mask = df["roof"].isin(["dome", "closed"])
+    df.loc[indoor_mask, "wind"] = 0
+
+    # Outdoor games still missing data (mostly 2022): impute with league-wide
+    # outdoor median. Computed from outdoor rows only so indoor zeros don't
+    # drag the median.
+    outdoor_wind_median = df.loc[~indoor_mask, "wind"].median()
+    df["wind"] = df["wind"].fillna(outdoor_wind_median)
+
+    return df.drop(columns=["roof"]).rename(columns={"wind": "wind_speed"})
 
 
 def add_last_game_vs_season_avg(df: pd.DataFrame) -> pd.DataFrame:
