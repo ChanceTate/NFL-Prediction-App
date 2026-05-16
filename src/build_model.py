@@ -7,18 +7,18 @@ from sklearn.metrics import mean_absolute_error
 from src.data import filter_qbs
 from src.features import (
     FEATURE_COLS,
+    add_home_away_rolling,
     add_last_game_vs_season_avg,
     add_opponent_pass_defense,
     add_qb_vs_defense_history,
+    add_rolling_CPOE,
     add_rolling_epa_per_attempt,
     add_rolling_pass_attempts,
+    add_rolling_passing_air_yards,
     add_rolling_passing_yards,
     add_rolling_team_plays,
     add_rolling_yds_slope,
     add_top_receiver_rolling,
-    add_rolling_passing_air_yards,
-    add_rolling_CPOE,
-    add_home_away_rolling
 )
 
 TARGET_COL = "passing_yards"

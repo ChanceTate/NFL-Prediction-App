@@ -30,7 +30,24 @@ def home_away(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(columns='home_team')
 
     return df
+"""
+def vegas_lines(df: pd.DataFrame) -> pd.DataFrame:
+    pbp = nfl.load_pbp(SEASONS).to_pandas()
 
-#df = nfl.load_player_stats([2025])
+    vegas = (
+        pbp[["game_id", "spread_line", "total_line"]].drop_duplicates(subset="game_id")
+    )
+    df = df.merge(vegas, on="game_id", how="left")
+    df["spread_line_adjusted"]  = df.apply(
+        lambda x: x["spread_line"] if x["is_home"] == 1 else -x["spread_line"], axis=1
+    )
+    df["implied_team_total"] = (df["total_line"] / 2) + (df["spread_line_adjusted"] / 2)
 
-#print(df.columns)
+    return df
+"""
+"""
+df = nfl.load_player_stats(SEASONS).to_pandas()
+pbp = nfl.load_pbp(SEASONS).to_pandas()
+print(df["game_id"].iloc[0])
+print(pbp["game_id"].iloc[0])
+"""

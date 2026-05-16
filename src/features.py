@@ -1,5 +1,7 @@
 import pandas as pd
+
 from src.data import home_away
+
 FEATURE_COLS = [
     "rolling_yds_3",
     "rolling_pass_atts_3",
@@ -12,19 +14,31 @@ FEATURE_COLS = [
     "last_game_vs_season_avg",
     "rolling_airyds_3",
     "rolling_CPOE_3",
-    "rolling_home_away_3"
+    "rolling_home_away_3",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
 # and would just waste compute) and QBs (rarely catch passes, would clutter
 # the per-team max).
 RECEIVING_POSITIONS = {"WR", "TE", "RB", "FB"}
+"""
+def add_vegas_lines(df: pd.DataFrame) -> pd.DataFrame:
+    df = home_away(df)
+    df = vegas_lines(df)
 
+    df["is_home"] = df["is_home"].fillna(0)
+    df["implied_team_total"] = df["implied_team_total"].fillna(df["implied_team_total"].median())
+
+    df = df.sort_values(["player_id", "season", "week"])
+    return df
+"""
 def add_home_away_rolling(df: pd.DataFrame) -> pd.DataFrame:
     df = home_away(df)
     df = df.sort_values(["player_id", "season", "week"]).copy()
     df["rolling_home_away_3"] =(
-        df.groupby("player_id")["is_home"].transform(lambda x: x.shift(1).rolling(3, min_periods=1).mean())
+        df.groupby("player_id")["is_home"]
+        .transform(lambda x: x.shift(1).rolling(3, min_periods=1).mean())
+        .fillna(0.5)
     )
     return df
 
