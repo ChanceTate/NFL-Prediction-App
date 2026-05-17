@@ -1,6 +1,6 @@
 import pandas as pd
+from src.data import vegas_lines, home_away, load_next_gen_stats
 
-from src.data import home_away
 
 FEATURE_COLS = [
     "rolling_yds_3",
@@ -12,26 +12,45 @@ FEATURE_COLS = [
     "qb_vs_def_avg_yds",
     "rolling_yds_slope_3",
     "last_game_vs_season_avg",
-    "rolling_airyds_3",
-    "rolling_CPOE_3",
-    "rolling_home_away_3",
+    "implied_team_total"
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
 # and would just waste compute) and QBs (rarely catch passes, would clutter
 # the per-team max).
 RECEIVING_POSITIONS = {"WR", "TE", "RB", "FB"}
+
 """
+def add_ngs(df: pd.DataFrame) -> pd.DataFrame:
+    ngs = load_next_gen_stats()
+    ngs = ngs[["player_gsis_id", "season", "week", 
+                "avg_intended_air_yards", "aggressiveness", 
+                "avg_time_to_throw", "completion_percentage_above_expectation"]]
+    df = df.merge(
+        ngs,
+        left_on = ["player_id", "season", "week"],
+        right_on=["player_gsis_id", "season", "week"],
+        how="left"
+    ).drop(columns="player_gsis_id")
+
+    df = df.sort_values(["player_id", "season", "week"])
+
+    for col in ["avg_intended_air_yards", "aggressiveness", 
+                "avg_time_to_throw", "completion_percentage_above_expectation"]:
+        df[f"rolling_{col}_3"] = (
+            df.groupby("player_id")[col]
+            .transform(lambda x: x.shift(1).rolling(3, min_periods=1).mean())
+        ).fillna(0)
+
+    return df
+"""
+
 def add_vegas_lines(df: pd.DataFrame) -> pd.DataFrame:
     df = home_away(df)
     df = vegas_lines(df)
-
-    df["is_home"] = df["is_home"].fillna(0)
-    df["implied_team_total"] = df["implied_team_total"].fillna(df["implied_team_total"].median())
-
     df = df.sort_values(["player_id", "season", "week"])
     return df
-"""
+
 def add_home_away_rolling(df: pd.DataFrame) -> pd.DataFrame:
     df = home_away(df)
     df = df.sort_values(["player_id", "season", "week"]).copy()

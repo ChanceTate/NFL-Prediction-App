@@ -1,13 +1,14 @@
 from pathlib import Path
-
+import os
 import nflreadpy as nfl
 import pandas as pd
 
-SEASONS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+SEASONS = list(range(2016, 2026))
 # Cache filename includes the season range so changing SEASONS auto-busts the
 # cache instead of silently serving stale data.
 CACHE = Path(f"data/player_stats_{min(SEASONS)}-{max(SEASONS)}.parquet")
 SCHEDULES_CACHE = Path(f"data/schedules_{min(SEASONS)}-{max(SEASONS)}.parquet")
+NGS_CACHE = Path(f"data/ngs_{min(SEASONS)}-{max(SEASONS)}.parquet")
 
 
 def load_player_data() -> pd.DataFrame:
@@ -25,6 +26,14 @@ def load_schedules() -> pd.DataFrame:
     df = nfl.load_schedules(SEASONS).to_pandas()
     SCHEDULES_CACHE.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(SCHEDULES_CACHE)
+    return df
+
+def load_next_gen_stats() -> pd.DataFrame:
+    if NGS_CACHE.exists():
+        return pd.read_parquet(NGS_CACHE)
+    df = nfl.load_nextgen_stats(SEASONS, stat_type="passing").to_pandas()
+    NGS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(NGS_CACHE)
     return df
 
 
@@ -58,25 +67,29 @@ def home_away(df: pd.DataFrame) -> pd.DataFrame:
     return df.merge(long, on=["season", "week", "team"], how="left")
 
 
-"""
+
 def vegas_lines(df: pd.DataFrame) -> pd.DataFrame:
     pbp = nfl.load_pbp(SEASONS).to_pandas()
 
     vegas = (
-        pbp[["game_id", "spread_line", "total_line"]].drop_duplicates(subset="game_id")
+        pbp[["season", "week", "home_team", "away_team", "spread_line", "total_line"]]
+        .drop_duplicates(subset=["season", "week", "home_team"])
     )
-    df = df.merge(vegas, on="game_id", how="left")
+    home = vegas[["season", "week", "home_team", "spread_line", "total_line"]].rename(columns={"home_team": "team"})
+    away = vegas[["season", "week", "away_team", "spread_line", "total_line"]].rename(columns={"away_team": "team"})
+
+    vegas_both = pd.concat([home, away], ignore_index=True)
+
+    df = df.merge(
+        vegas_both[["season", "week", "team", "spread_line", "total_line"]],
+        on=["season", "week", "team"],
+        how = "left"
+     )
     df["spread_line_adjusted"]  = df.apply(
         lambda x: x["spread_line"] if x["is_home"] == 1 else -x["spread_line"], axis=1
     )
     df["implied_team_total"] = (df["total_line"] / 2) + (df["spread_line_adjusted"] / 2)
 
     return df
-"""
-"""
-df = nfl.load_player_stats(SEASONS).to_pandas()
-pbp = nfl.load_pbp(SEASONS).to_pandas()
-print(df["game_id"].iloc[0])
-print(pbp["game_id"].iloc[0])
-"""
-   
+
+
