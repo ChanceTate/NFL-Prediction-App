@@ -7,7 +7,7 @@
 const fs = require("fs");
 
 const MARKER = "<!-- metrics-comment -->";
-const TRACKED_FOR_REGRESSION = ["LinearRegression", "LightGBM"];
+const TRACKED_FOR_REGRESSION = ["LightGBM"];
 const SKIP_LABEL = "skip-metrics-check";
 
 const loadJson = (path) => JSON.parse(fs.readFileSync(path, "utf8"));

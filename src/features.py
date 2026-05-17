@@ -2,6 +2,8 @@ import pandas as pd
 from src.data import vegas_lines, home_away, load_next_gen_stats
 
 
+from src.data import TEAM_CODE_REMAP, attach_schedule_columns
+
 FEATURE_COLS = [
     "rolling_yds_3",
     "rolling_pass_atts_3",
@@ -13,6 +15,9 @@ FEATURE_COLS = [
     "rolling_yds_slope_3",
     "last_game_vs_season_avg",
     "implied_team_total"
+    "rolling_pass_fd_per_att_3",
+    "rolling_team_points_3",
+    "wind_speed",
 ]
 
 # Positions that catch passes. Excludes defenders (who have 0 receiving_yards
@@ -74,6 +79,25 @@ def add_rolling_pass_attempts(df: pd.DataFrame) -> pd.DataFrame:
     df["rolling_pass_atts_3"] = df.groupby("player_id")["attempts"].transform(
         lambda x: x.shift(1).rolling(3).mean()
     )
+    return df
+
+
+def add_rolling_pass_fd_per_att(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.sort_values(["player_id", "season", "week"]).copy()
+    # passing_first_downs is the count of pass plays that earned a first down.
+    # Fill NaN as 0 in case it's missing for any rows
+    fds = df["passing_first_downs"].fillna(0)
+
+    # Volume-weighted: sum(first_downs) / sum(attempts) over the prior 3 games.
+    rolling_fds = fds.groupby(df["player_id"]).transform(lambda x: x.shift(1).rolling(3).sum())
+    rolling_atts = df.groupby("player_id")["attempts"].transform(
+        lambda x: x.shift(1).rolling(3).sum()
+    )
+    ratio = rolling_fds / rolling_atts.where(rolling_atts != 0)
+    # Backups with 0 attempts across all 3 prior games: impute 0 (no signal) so
+    # the row stays in the universe instead of being dropped.
+    no_signal = rolling_atts.notna() & (rolling_atts == 0)
+    df["rolling_pass_fd_per_att_3"] = ratio.mask(no_signal, 0)
     return df
 
 
@@ -183,6 +207,47 @@ def add_rolling_team_plays(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.Dat
     )
 
 
+def add_rolling_team_points(qb_df: pd.DataFrame, schedules: pd.DataFrame) -> pd.DataFrame:
+    # Game-script proxy. Teams that have been losing recently throw more in the
+    # next game
+    home = schedules[["season", "week", "home_team", "home_score"]].rename(
+        columns={"home_team": "team", "home_score": "points"}
+    )
+    away = schedules[["season", "week", "away_team", "away_score"]].rename(
+        columns={"away_team": "team", "away_score": "points"}
+    )
+    team_pts = pd.concat([home, away], ignore_index=True)
+    team_pts["team"] = team_pts["team"].replace(TEAM_CODE_REMAP)
+    team_pts = team_pts.sort_values(["team", "season", "week"]).reset_index(drop=True)
+
+    # Rolling within season so the feature reflects current-season scoring form.
+    team_pts["rolling"] = team_pts.groupby(["team", "season"])["points"].transform(
+        lambda x: x.shift(1).rolling(3).mean()
+    )
+
+    # Same fallback chain as other team features: current → prior-season team
+    # avg → league avg.
+    prior_season = (
+        team_pts.groupby(["team", "season"], as_index=False)["points"]
+        .mean()
+        .rename(columns={"points": "prior_season_avg"})
+    )
+    prior_season["season"] = prior_season["season"] + 1
+    team_pts = team_pts.merge(prior_season, on=["team", "season"], how="left")
+
+    league_avg = team_pts["points"].mean()
+
+    team_pts["rolling_team_points_3"] = (
+        team_pts["rolling"].fillna(team_pts["prior_season_avg"]).fillna(league_avg)
+    )
+
+    return qb_df.merge(
+        team_pts[["team", "season", "week", "rolling_team_points_3"]],
+        on=["team", "season", "week"],
+        how="left",
+    )
+
+
 def add_top_receiver_rolling(qb_df: pd.DataFrame, full_df: pd.DataFrame) -> pd.DataFrame:
     # For each (team, season, week), compute the max rolling 3-game receiving
     # yards across the team's receiving-position players.
@@ -260,6 +325,25 @@ def add_rolling_yds_slope(df: pd.DataFrame) -> pd.DataFrame:
     grouped = df.groupby("player_id")["passing_yards"]
     df["rolling_yds_slope_3"] = (grouped.shift(1) - grouped.shift(3)) / 2
     return df
+
+
+def add_weather(qb_df: pd.DataFrame, schedules: pd.DataFrame) -> pd.DataFrame:
+    # Wind decays high throws and the deep ball. Indoor games (dome/closed)
+    # carry no wind, so they get wind=0 the model can split on that to
+    # effectively ignore wind for indoor rows. Open-roof games are treated as
+    # outdoor since the roof being retracted at gametime is when wind mattered.
+    df = attach_schedule_columns(qb_df, schedules, ["roof", "wind"])
+
+    indoor_mask = df["roof"].isin(["dome", "closed"])
+    df.loc[indoor_mask, "wind"] = 0
+
+    # Outdoor games still missing data (mostly 2022): impute with league-wide
+    # outdoor median. Computed from outdoor rows only so indoor zeros don't
+    # drag the median.
+    outdoor_wind_median = df.loc[~indoor_mask, "wind"].median()
+    df["wind"] = df["wind"].fillna(outdoor_wind_median)
+
+    return df.drop(columns=["roof"]).rename(columns={"wind": "wind_speed"})
 
 
 def add_last_game_vs_season_avg(df: pd.DataFrame) -> pd.DataFrame:

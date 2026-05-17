@@ -12,11 +12,14 @@ from src.features import (
     add_qb_vs_defense_history,
     add_rolling_epa_per_attempt,
     add_rolling_pass_attempts,
+    add_rolling_pass_fd_per_att,
     add_rolling_passing_yards,
     add_rolling_team_plays,
+    add_rolling_team_points,
     add_rolling_yds_slope,
     add_top_receiver_rolling,
-    add_vegas_lines
+    add_vegas_lines,
+    add_weather,
 )
 
 TARGET_COL = "passing_yards"
@@ -83,6 +86,7 @@ def split_train_test(
 
 def build_training_set(
     df: pd.DataFrame,
+    schedules: pd.DataFrame,
     train_seasons: list[int],
     test_seasons: list[int],
 ):
@@ -98,6 +102,9 @@ def build_training_set(
     qbs = add_rolling_yds_slope(qbs)
     qbs = add_last_game_vs_season_avg(qbs)
     qbs = add_vegas_lines(qbs)
+    qbs = add_rolling_pass_fd_per_att(qbs)
+    qbs = add_rolling_team_points(qbs, schedules)
+    qbs = add_weather(qbs, schedules)
 
     qbs = qbs.dropna(subset=ROW_INCLUSION_FEATURES + [TARGET_COL])
     _assert_no_extra_nans(qbs, FEATURE_COLS)
@@ -112,12 +119,13 @@ def train_linear_regression(X_train, Y_train) -> LinearRegression:
 def train_lightgbm(X_train, Y_train) -> LGBMRegressor:
     # Tuned via scripts/tune_lgbm.py.
     return LGBMRegressor(
+        objective="regression_l1",
         n_estimators=200,
         learning_rate=0.03,
-        num_leaves=4,
+        num_leaves=8,
         min_child_samples=10,
         reg_lambda=0.0,
-        colsample_bytree=0.5,
+        colsample_bytree=1.0,
         subsample=0.8,
         subsample_freq=1,
         random_state=42,
