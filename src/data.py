@@ -81,7 +81,6 @@ def home_away(df: pd.DataFrame, schedules: pd.DataFrame) -> pd.DataFrame:
     return df.merge(long, on=["season", "week", "team"], how="left")
 
 
-
 def vegas_lines(df: pd.DataFrame) -> pd.DataFrame:
     pbp = nfl.load_pbp(SEASONS).to_pandas()
 

@@ -1,7 +1,5 @@
 import pandas as pd
-from src.data import vegas_lines, home_away, load_next_gen_stats
-
-
+from src.data import vegas_lines, home_away, load_schedules
 from src.data import TEAM_CODE_REMAP, attach_schedule_columns
 
 FEATURE_COLS = [
@@ -14,7 +12,7 @@ FEATURE_COLS = [
     "qb_vs_def_avg_yds",
     "rolling_yds_slope_3",
     "last_game_vs_season_avg",
-    "implied_team_total"
+    "implied_team_total",
     "rolling_pass_fd_per_att_3",
     "rolling_team_points_3",
     "wind_speed",
@@ -51,13 +49,15 @@ def add_ngs(df: pd.DataFrame) -> pd.DataFrame:
 """
 
 def add_vegas_lines(df: pd.DataFrame) -> pd.DataFrame:
-    df = home_away(df)
+    schedules = load_schedules()
+    df = home_away(df, schedules)
     df = vegas_lines(df)
     df = df.sort_values(["player_id", "season", "week"])
     return df
 
 def add_home_away_rolling(df: pd.DataFrame) -> pd.DataFrame:
-    df = home_away(df)
+    schedules = load_schedules()
+    df = home_away(df, schedules)
     df = df.sort_values(["player_id", "season", "week"]).copy()
     df["rolling_home_away_3"] =(
         df.groupby("player_id")["is_home"]
