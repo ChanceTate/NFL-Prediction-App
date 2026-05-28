@@ -1,71 +1,87 @@
 # NFL Prediction App
-Full-stack machine learning application that predicts NFL QB game performance using historical data. Built with Python, scikitlearn, and FastAPI, with a Dockerized backend and interactive frontend for real time predictions
 
-#Overview
-This project predicts quarterback performance for upcoming games using historical game data and machine learning models.
+Full-stack machine learning project for predicting NFL quarterback passing yards from historical player data. The app builds a quarterback-only training set, engineers matchup and recent-form features, compares multiple regression models, and reports walk-forward validation metrics.
 
-This is accomplished by combining:
--A data pipeline for processing QB game logs
--Feature engineering to capture recent performance trends
-- Regression models for prediction
--A backend API for real-time prediction
--A simple frontend interface for user interaction
--Docker for reproducible deployment
+## Overview
 
-Quarterback performance varies week-to-week and is context dependent.
+Quarterback passing performance changes week to week, so the model uses prior-game context instead of current-game results. The pipeline:
 
-This project aims to predict upcoming game QB performance using historical statistics and engineered features representing recent trends.
+- downloads and caches NFL player statistics with `nflreadpy`
+- filters the dataset to quarterbacks
+- creates rolling and matchup features from historical games
+- trains Linear Regression, LightGBM, and a mean baseline model
+- evaluates each model with sliding-window walk-forward validation
+- writes model metrics and feature analysis artifacts
 
-#Tech Stack
--Python
--pandas
--scikit-learn
--FastAPI
--Docker
--HTML/JavaScript frontend
+## Tech Stack
 
-#Data
-Data is source from Pro Football Reference
+- Python 3.12+
+- pandas
+- scikit-learn
+- LightGBM
+- nflreadpy
+- pytest and ruff
+- GitHub Actions for linting, tests, and model metrics
 
-Each record represents a single QB game and includes:
--Passing yards
--Touchdowns
--Interceptions
--Completions/attempts
--Opponent
--Game date
+## Data
 
-#Feature engineering
-Raw game data is transformed into model-ready features that represent a QB's recent performance.
+Player stats are loaded from `nflreadpy` and cached under `data/` so repeat runs do not have to download the same seasons again. Each row represents one player game and includes passing, rushing, receiving, team, opponent, season, and week fields. The training pipeline filters this data to QB rows after using the full dataset for team, defense, and receiver context.
 
-Key features include:
--Rolling averages (last 3 games)
--Completion percentage trends
--Touchdown and interception rates
--Home vs. Away encoding
--Opponent strength
+## Feature engineering
 
-#Model
-This project uses regression  models to predict QB performance
+The current feature set includes:
 
-Models used:
--Linear Regression
+- rolling 3-game QB passing yards
+- rolling 3-game QB pass attempts
+- opponent rolling passing yards allowed
+- rolling EPA per pass attempt
+- rolling team offensive plays
+- top receiver rolling receiving yards
+- QB historical average against the same defense
+- rolling passing-yards trend slope
 
-Targets:
--Passing yards
--Touchdowns
--Interceptions
+These features are generated without using the current game's target value, then checked for unexpected missing values before training.
 
-Models are evaluated using Mean Absolute Error (MAE)
+## Model evaluation
 
-#API
-The backend exposes a prediction endpoint using FastAPI
+The project evaluates models with sliding-window walk-forward validation. Each fold trains on three consecutive seasons and tests on the following season, from 2019 through 2025 test seasons. Results are reported with MAE and R² for:
 
-#Frontend
-A simple interface allows users to:
--Enter a QB name
--Request prediction
--View projected stats
+- Linear Regression
+- LightGBM
+- Baseline mean regressor
 
-#Docker
-This application is containerized for easy setup and portability
+Running `main.py` also produces:
+
+- `metrics.json` with per-fold and aggregate metrics
+- `importance.json` with permutation feature importance
+- `ablation.json` with leave-one-feature-out ablation results
+
+## Model metrics in pull requests
+
+The CI workflow runs the model on pull requests, uploads the metrics artifacts, and compares PR results against the latest successful `main` run when available. This gives reviewers an automatically updated view of whether a change improves or regresses model performance.
+
+## Getting started
+
+Install dependencies with uv:
+
+```bash
+uv sync --all-groups
+```
+
+Run linting and tests:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+```
+
+Run the model pipeline:
+
+```bash
+uv run main.py
+```
+
+## Docker
+
+The included Dockerfile can be used for reproducible local runs or deployment environments that should not depend on a developer's Python installation.
