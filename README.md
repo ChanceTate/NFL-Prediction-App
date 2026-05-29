@@ -50,6 +50,9 @@ This project uses regression  models to predict QB performance
 
 Models used:
 -Linear Regression
+-LightGBM (tuned via `scripts/tune_lgbm.py`)
+
+See `EXPERIMENTS.md` for latest model stats and evaluation results.
 
 Targets:
 -Passing yards
